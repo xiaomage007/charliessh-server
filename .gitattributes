@@ -1,2 +1,0 @@
-# 钩子脚本必须保持 LF，否则 Windows 下 sh 执行报 bad interpreter
-.githooks/pre-commit text eol=lf
