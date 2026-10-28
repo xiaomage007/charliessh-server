@@ -21,10 +21,10 @@ public class SshSessionPortManualTest {
     /**
      * 这个里的IP、账号要换成你自己的云服务器
      */
-    private static final String HOST = "81.70.245.73";
+    private static final String HOST = "115.159.150.103";
     private static final int PORT = 22;
     private static final String USERNAME = "ubuntu";
-    private static final String CONNECTION_ID = "manual-ssh-test";
+    private static final String CONNECTION_ID = "lhins-l9s2omko";
 
     @Test
     public void test_connect_and_execute_commands_interactively() throws Exception {
