@@ -23,6 +23,12 @@
             <groupId>com.charlie.ai</groupId>
             <artifactId>charliessh-server-domain</artifactId>
         </dependency>
+
+        <!-- SSH 连接库 -->
+        <dependency>
+            <groupId>com.jcraft</groupId>
+            <artifactId>jsch</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
