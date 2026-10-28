@@ -19,7 +19,7 @@ import java.util.Scanner;
 public class SshSessionPortManualTest {
 
     /**
-     * 这个里的IP、账号要换成你自己的云服务器；<a href="http://618.gaga.plus/">http://618.gaga.plus/</a>
+     * 这个里的IP、账号要换成你自己的云服务器
      */
     private static final String HOST = "81.70.245.73";
     private static final int PORT = 22;
