@@ -7,7 +7,6 @@ import lombok.NoArgsConstructor;
 
 /**
  * SSH连接请求DTO
- *
  */
 @Data
 @Builder
