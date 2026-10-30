@@ -1,7 +1,7 @@
 package com.charlie.ai.trigger.http;
 
 
-import com.charlie.ai.api.ISshConnectionService;
+import com.charlie.ai.api.ISshConnectionApiService;
 import com.charlie.ai.api.dto.SshConnectionRequestDTO;
 import com.charlie.ai.api.dto.SshConnectionResponseDTO;
 import com.charlie.ai.api.response.Response;
@@ -9,7 +9,7 @@ import com.charlie.ai.domain.ssh.model.entity.SshConnectionConfigEntity;
 import com.charlie.ai.domain.ssh.model.entity.SshConnectionEntity;
 import com.charlie.ai.domain.ssh.model.valobj.AuthTypeEnum;
 import com.charlie.ai.domain.ssh.model.valobj.ConnectionStatusEnum;
-import com.charlie.ai.domain.ssh.service.ISshConnectionDomainService;
+import com.charlie.ai.domain.ssh.service.connection.ISshConnectionService;
 import com.charlie.ai.types.enums.ResponseCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -27,12 +27,12 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/v1/ssh")
 @CrossOrigin(origins = "*")
-public class SshConnectionController implements ISshConnectionService {
+public class SshConnectionController implements ISshConnectionApiService {
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Resource
-    private ISshConnectionDomainService sshConnectionDomainService;
+    private ISshConnectionService sshConnectionService;
 
     @RequestMapping(value = "create_connection", method = RequestMethod.POST)
     @Override
@@ -43,7 +43,7 @@ public class SshConnectionController implements ISshConnectionService {
             SshConnectionEntity entity = toEntity(requestDTO);
             SshConnectionConfigEntity configEntity = toConfigEntity(requestDTO);
 
-            sshConnectionDomainService.createConnection(entity, configEntity);
+            sshConnectionService.createConnection(entity, configEntity);
 
             return Response.<SshConnectionResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
@@ -74,10 +74,10 @@ public class SshConnectionController implements ISshConnectionService {
             SshConnectionEntity entity = toEntity(requestDTO);
             SshConnectionConfigEntity configEntity = toConfigEntity(requestDTO);
 
-            sshConnectionDomainService.updateConnection(entity, configEntity);
+            sshConnectionService.updateConnection(entity, configEntity);
 
             // 查询更新后的完整数据返回
-            SshConnectionEntity updated = sshConnectionDomainService.getConnection(entity.getConnectionId());
+            SshConnectionEntity updated = sshConnectionService.getConnection(entity.getConnectionId());
 
             return Response.<SshConnectionResponseDTO>builder()
                     .code(ResponseCode.SUCCESS.getCode())
@@ -104,7 +104,7 @@ public class SshConnectionController implements ISshConnectionService {
     public Response<Void> deleteConnection(@RequestParam("connectionId") String connectionId) {
         try {
             log.info("删除SSH连接 connectionId={}", connectionId);
-            sshConnectionDomainService.deleteConnection(connectionId);
+            sshConnectionService.deleteConnection(connectionId);
 
             return Response.<Void>builder()
                     .code(ResponseCode.SUCCESS.getCode())
@@ -130,7 +130,7 @@ public class SshConnectionController implements ISshConnectionService {
     public Response<SshConnectionResponseDTO> getConnection(@RequestParam("connectionId") String connectionId) {
         try {
             log.info("查询SSH连接 connectionId={}", connectionId);
-            SshConnectionEntity entity = sshConnectionDomainService.getConnection(connectionId);
+            SshConnectionEntity entity = sshConnectionService.getConnection(connectionId);
 
             if (entity == null) {
                 return Response.<SshConnectionResponseDTO>builder()
@@ -158,13 +158,13 @@ public class SshConnectionController implements ISshConnectionService {
     public Response<List<SshConnectionResponseDTO>> getConnectionList(@RequestParam(value = "userId", defaultValue = "default") String userId) {
         try {
             log.info("查询SSH连接列表 userId={}", userId);
-            List<SshConnectionEntity> entities = sshConnectionDomainService.getConnectionList(userId);
+            List<SshConnectionEntity> entities = sshConnectionService.getConnectionList(userId);
 
             // 同步实际的连接状态
             List<SshConnectionResponseDTO> dtoList = entities.stream()
                     .map(entity -> {
                         // 检查实际的 SSH 连接状态
-                        boolean actuallyConnected = sshConnectionDomainService.isConnected(entity.getConnectionId());
+                        boolean actuallyConnected = sshConnectionService.isConnected(entity.getConnectionId());
                         if (actuallyConnected && entity.getStatus() != ConnectionStatusEnum.CONNECTED) {
                             entity.setStatus(ConnectionStatusEnum.CONNECTED);
                         } else if (!actuallyConnected && entity.getStatus() == ConnectionStatusEnum.CONNECTED) {
@@ -193,7 +193,7 @@ public class SshConnectionController implements ISshConnectionService {
     public Response<Void> connect(@RequestParam("connectionId") String connectionId) {
         try {
             log.info("建立SSH连接 connectionId={}", connectionId);
-            boolean success = sshConnectionDomainService.connect(connectionId);
+            boolean success = sshConnectionService.connect(connectionId);
 
             if (success) {
                 return Response.<Void>builder()
@@ -226,7 +226,7 @@ public class SshConnectionController implements ISshConnectionService {
     public Response<Void> disconnect(@RequestParam("connectionId") String connectionId) {
         try {
             log.info("断开SSH连接 connectionId={}", connectionId);
-            sshConnectionDomainService.disconnect(connectionId);
+            sshConnectionService.disconnect(connectionId);
 
             return Response.<Void>builder()
                     .code(ResponseCode.SUCCESS.getCode())
