@@ -7,7 +7,7 @@ import com.charlie.ai.api.response.Response;
  * SSH 终端服务接口
  * 提供终端会话的打开、读写、调整大小、关闭等操作
  */
-public interface ISshTerminalService {
+public interface ISshTerminalApiService {
 
     /**
      * 打开终端会话

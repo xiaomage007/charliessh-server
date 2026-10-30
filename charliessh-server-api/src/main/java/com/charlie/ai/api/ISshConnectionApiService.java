@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * SSH连接服务远程接口
  */
-public interface ISshConnectionService {
+public interface ISshConnectionApiService {
 
     /**
      * 创建SSH连接
