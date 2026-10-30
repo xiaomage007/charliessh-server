@@ -42,7 +42,9 @@ public class SshSessionPort implements ISshSessionPort {
         try {
             Session session = jsch.getSession(username, host, port);
             session.setConfig("StrictHostKeyChecking", "no");
-            session.setTimeout(30000); // 30秒超时
+            session.setConfig("ServerAliveInterval", "30");   // 每30秒发送keep-alive
+            session.setConfig("ServerAliveCountMax", "3");     // 3次无响应才断开
+            session.setTimeout(0); // 不设置socket超时，避免reader线程被误杀
 
             if (privateKey != null && !privateKey.isEmpty()) {
                 // 私钥认证
