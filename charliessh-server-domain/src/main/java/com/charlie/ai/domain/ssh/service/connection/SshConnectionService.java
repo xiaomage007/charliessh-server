@@ -1,10 +1,11 @@
-package com.charlie.ai.domain.ssh.service;
+package com.charlie.ai.domain.ssh.service.connection;
 
 import com.charlie.ai.domain.ssh.adapter.port.ISshSessionPort;
 import com.charlie.ai.domain.ssh.adapter.repository.ISshConnectionRepository;
 import com.charlie.ai.domain.ssh.model.entity.SshConnectionConfigEntity;
 import com.charlie.ai.domain.ssh.model.entity.SshConnectionEntity;
 import com.charlie.ai.domain.ssh.model.valobj.ConnectionStatusEnum;
+import com.charlie.ai.domain.ssh.service.ISshConnectionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -17,7 +18,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
-public class SshConnectionService implements ISshConnectionDomainService {
+public class SshConnectionService implements ISshConnectionService {
 
     private final ISshConnectionRepository repository;
     private final ISshSessionPort sshSessionService;

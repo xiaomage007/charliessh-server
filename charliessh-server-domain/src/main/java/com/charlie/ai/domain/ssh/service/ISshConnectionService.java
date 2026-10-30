@@ -10,7 +10,7 @@ import java.util.List;
  * SSH连接领域服务接口
  *
  */
-public interface ISshConnectionDomainService {
+public interface ISshConnectionService {
 
     /**
      * 创建SSH连接
