@@ -1,8 +1,10 @@
 package com.charlie.ai.domain.agent.service.armory.matter.tools;
 
+import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
 import com.charlie.ai.domain.ssh.service.ISshTerminalService;
 import com.google.adk.tools.Annotations;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -23,6 +25,14 @@ public class SshExecuteAdkTool {
 
     @Resource
     private ISshTerminalService sshTerminalService;
+
+    /** 单条命令执行超时（秒） */
+    @Value("${ssh.agent.exec.timeout-seconds:60}")
+    private int execTimeoutSeconds;
+
+    /** 工具回传给模型的输出上限（字符），超出部分截断，避免撑爆模型上下文 */
+    @Value("${ssh.agent.exec.max-output-length:4000}")
+    private int maxOutputLength;
 
     /**
      * ============================================================================
@@ -86,32 +96,30 @@ public class SshExecuteAdkTool {
      * 场景：sessionId 在 HTTP/Agent 入口线程中确定，而 ADK 的 Runner、LLM 调用、
      * 工具执行可能在它自己创建的线程里跑，工具方法拿不到入口的局部变量。
      * <p>
-     * 标准三步（set → get → remove）：
-     * 1) 入口处 set：
-     * SshExecuteAdkTool.setCurrentSession(sessionId);
-     * 2) 工具方法内 get：
-     * String sid = SshExecuteAdkTool.getCurrentSession();
-     * 3) finally 清理：
-     * SshExecuteAdkTool.clearCurrentSession();
+     * 当前项目（ChatService.handleMessageStream）的实际做法：
+     * <pre>
+     * return Flowable.defer(() -> {
+     *            SshExecuteAdkTool.setCurrentTerminalSession(terminalSessionId);
+     *            return runner.runAsync(userId, sessionId, userMsg);
+     *        })
+     *        .doFinally(() -> SshExecuteAdkTool.clearCurrentTerminalSession());
+     * </pre>
+     * 三个要点：
+     * <ol>
+     *     <li><b>set 必须在 defer 里</b>：ADK 的 runAsync 返回 cold Flowable，
+     *         事件流在【订阅时】才开始。若在方法返回前就 set，而订阅发生在别的线程，
+     *         工具执行时就读不到（InheritableThreadLocal 只在线程创建时继承一次）。
+     *         放进 defer 后，set 与工具执行落在同一个订阅线程上。</li>
+     *     <li><b>必须 remove</b>：Web 容器 / 线程池会复用线程。不清理的话，
+     *         下一个请求会读到上一个请求残留的 terminalSessionId，
+     *         导致命令被发到【别人的服务器】上执行——这是安全问题，不是洁癖。
+     *         doFinally 覆盖正常结束 / 异常 / 取消三条收尾路径。</li>
+     *     <li><b>读不到就明确报错</b>：工具内 get 到 null 时直接返回"未绑定 SSH 终端会话"，
+     *         绝不 fallback 到某个"默认会话"，避免误操作到错误的机器。</li>
+     * </ol>
      * <p>
-     * 调用示例：
-     * // 入口：Controller / Agent 调度处
-     * SshExecuteAdkTool.setCurrentSession(entity.getSessionId());
-     * try {
-     * runner.runAsync(session);      // 内部 new 线程执行工具，子线程自动继承 sessionId
-     * } finally {
-     * SshExecuteAdkTool.clearCurrentSession();
-     * }
-     * <p>
-     * // 工具方法内（实例方法，需要用注入的 sshTerminalService）
-     * String sessionId = getCurrentSession();
-     * if (sessionId == null) {
-     * return "错误：当前线程没有终端会话上下文";
-     * }
-     * return sshTerminalService.executeCommand(sessionId, command);
-     * <p>
-     * 补充：若 ADK 内部走的是响应式/Reactor 线程池，线程不是 new 出来的，
-     * 上面的继承不成立，需要改用 Reactor Context 透传，或干脆把 sessionId
+     * 补充：若 ADK 内部走的是响应式/Reactor 线程池（工具执行线程 ≠ 订阅线程），
+     * 上面的继承关系就不成立，需要改用 Reactor Context 透传，或干脆把 sessionId
      * 作为工具参数显式传给模型（更可控，代价是模型可能填错）。
      */
     private static final InheritableThreadLocal<String> currentTerminalSession = new InheritableThreadLocal<>();
@@ -177,30 +185,65 @@ public class SshExecuteAdkTool {
         try {
             log.info("SSH 执行命令: session={}, command={}", terminalSessionId, command);
 
-            // 执行命令
-            String output = sshTerminalService.executeCommand(terminalSessionId, command);
+            // 走 exec 通道：命令真正执行完才返回，输出与命令严格对应，并带真实退出码
+            TerminalExecResult result = sshTerminalService.executeCommand(
+                    terminalSessionId, command, execTimeoutSeconds);
 
-            log.info("SSH 命令执行完成: outputLength={}, output={}",
-                    output.length(), output.length() > 300 ? output.substring(0, 300) + "..." : output);
+            String rawOutput = result.getOutput();
+            String output = truncateOutput(rawOutput);
 
-            // 分析输出，判断是否成功
-            boolean success = isExecutionSuccessful(output, command);
+            log.info("SSH 命令执行完成: exitCode={}, timeout={}, duration={}ms, outputLength={}, output={}",
+                    result.getExitCode(), result.isTimeout(), result.getDurationMs(),
+                    rawOutput.length(), output);
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("command", command);
-            result.put("output", output);
-            result.put("success", success);
-
-            if (!success) {
-                result.put("suggestion", analyzeError(output, command));
+            // 成功判定：退出码优先；退出码未知（-1）时回退到关键词判断
+            boolean success = result.isSuccess();
+            if (result.getExitCode() < 0 && !result.isTimeout()) {
+                success = isExecutionSuccessful(rawOutput, command);
             }
 
-            return result;
+            Map<String, Object> resp = new HashMap<>();
+            resp.put("command", command);
+            resp.put("output", output);
+            resp.put("success", success);
+            resp.put("exitCode", result.getExitCode());
+
+            if (result.isTimeout()) {
+                resp.put("timeout", true);
+                resp.put("suggestion", "命令执行超过 " + execTimeoutSeconds + " 秒仍未结束，已被中断。"
+                        + "建议：①确认命令本身不会长时间阻塞（如 apt update、tail -f、watch）；"
+                        + "②改用带条件的后台方式执行；③确实需要更长等待时间时，请让用户确认后调大 ssh.agent.exec.timeout-seconds。");
+            } else if (!success) {
+                resp.put("suggestion", analyzeError(rawOutput, command, result.getExitCode()));
+            }
+
+            return resp;
 
         } catch (Exception e) {
             log.error("SSH 命令执行异常: session={}, command={}", terminalSessionId, command, e);
             return Map.of("success", false, "output", "命令执行异常: " + e.getMessage(), "command", command);
         }
+    }
+
+    /**
+     * 截断过长输出
+     * <p>
+     * 保留<b>头部</b>与<b>尾部</b>：头部通常是命令的正常输出，尾部通常是真正的报错原因，
+     * 中间部分用省略号标记。这样既不撑爆模型上下文，又不丢掉关键信息。
+     */
+    private String truncateOutput(String output) {
+        if (output == null) {
+            return "";
+        }
+        int limit = Math.max(maxOutputLength, 500);
+        if (output.length() <= limit) {
+            return output;
+        }
+        int headLength = (int) (limit * 0.7);
+        int tailLength = limit - headLength;
+        return output.substring(0, headLength)
+                + "\n...[输出过长，中间 " + (output.length() - limit) + " 字符已省略]...\n"
+                + output.substring(output.length() - tailLength);
     }
 
 
@@ -433,19 +476,39 @@ public class SshExecuteAdkTool {
     /**
      * 分析错误并给出可执行的解决建议
      * <p>
-     * 按"越具体越优先"的顺序匹配，命中即返回对应建议；
+     * 优先按<b>退出码</b>定位（最准确），再按"越具体越优先"的关键词匹配；
      * 全部未命中时兜底返回输出中最后一行有效内容，帮助模型自行定位根因。
      *
-     * @param output  终端原始输出
-     * @param command 本次执行的命令（用于剔除回显）
+     * @param output   终端原始输出
+     * @param command  本次执行的命令（用于剔除回显）
+     * @param exitCode 命令退出码，-1 表示未知
      * @return 建议文本；无输出时返回排查提示
      */
-    private String analyzeError(String output, String command) {
+    private String analyzeError(String output, String command, int exitCode) {
         if (output == null || output.isEmpty()) {
             return "命令执行失败，但没有捕获到任何输出。建议：①确认命令是否写对、是否需要以换行结尾提交；②确认 SSH 终端会话仍然存活；③重试一次并观察终端回显。";
         }
 
         String normalized = normalizeForMatch(output, command);
+
+        // 0. 按退出码定位（最可靠，优先于关键词匹配）
+        if (exitCode == 127) {
+            return "命令不存在（exit code 127）。建议：①核对命令拼写；②用 which/command -v <命令> 确认是否在 PATH 中；"
+                    + "③若软件未安装，先安装（如 apt install / yum install）；④若命令在容器内，改用绝对路径执行。";
+        }
+        if (exitCode == 126) {
+            return "命令存在但不可执行（exit code 126）。建议：①检查文件权限（ls -l），必要时 chmod +x <文件>；"
+                    + "②确认执行的是目录或无权限文件；③改用 sudo 执行。";
+        }
+        if (exitCode > 128) {
+            return "命令被信号 " + (exitCode - 128) + " 终止（exit code " + exitCode + "）。"
+                    + "建议：①确认是否被 OOM Killer 杀掉（dmesg | tail -20）；②命令是否需要 tty（vim/top 等交互式程序在 exec 通道下不可用）；"
+                    + "③是否被 Ctrl+C 或超时中断。";
+        }
+        if (exitCode > 0) {
+            return "命令执行失败，退出码 " + exitCode + "。建议：优先看输出最后几行，那通常才是真正的失败原因；"
+                    + "必要时加上调试参数（如 curl -v、docker --debug）重跑一次确认细节。";
+        }
 
         // 1. SSH 认证 / 免密
         if (containsAny(normalized, "authentication failed", "auth failed", "invalid credentials", "bad credentials",

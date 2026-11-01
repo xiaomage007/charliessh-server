@@ -1,7 +1,10 @@
 package com.charlie.ai.infrastructure.adapter.port;
 
 import com.charlie.ai.domain.ssh.adapter.port.ITerminalSessionPort;
+import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
+import com.jcraft.jsch.ChannelExec;
 import com.jcraft.jsch.ChannelShell;
+import com.jcraft.jsch.JSchException;
 import com.jcraft.jsch.Session;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -145,6 +148,157 @@ public class TerminalSessionPort implements ITerminalSessionPort {
         }
         log.error("写入终端失败 (已重试 {} 次) sessionId={}", WRITE_MAX_RETRIES, sessionId, lastError);
         throw new RuntimeException("写入终端失败: " + lastError.getMessage(), lastError);
+    }
+
+    /**
+     * 非交互式执行一条命令（exec 通道）
+     * <p>
+     * 【为什么 AI 工具必须走 exec 通道，而不是复用交互式 shell 通道】
+     * <pre>
+     * shell 通道（交互式）：
+     *   write("df -h")  → PTY canonical 模式必须收到 \n 才会提交给 shell
+     *                   → 不带 \n 时命令【根本不会执行】，终端只回显你输入的字符
+     *   read()         → 非阻塞快照，返回的是"上一条命令"的回显，天然滞后一拍
+     *
+     * exec 通道（非交互式）：
+     *   setCommand(cmd) + connect() → 服务端直接执行
+     *   命令结束 → stdout/stderr 关闭 → getExitStatus() 拿到真实退出码
+     *   输出与命令严格一一对应，不存在回显、不存在提示符、不存在错位
+     * </pre>
+     * 实现要点：
+     * <ol>
+     *     <li>stdout / stderr 必须<b>同时消费</b>——只读一个会让另一个的缓冲区写满，
+     *         阻塞远端命令，命令永远跑不完；</li>
+     *     <li>用「通道是否关闭」判断命令是否执行完毕，而不是靠固定 sleep 猜时间；</li>
+     *     <li>整体超时（含 connect 耗时），超时后主动 disconnect，避免僵尸通道。</li>
+     * </ol>
+     */
+    @Override
+    public TerminalExecResult execCommand(String connectionId, String command, int timeoutSeconds) {
+        Session session = sshSessionService.getSession(connectionId);
+        if (session == null || !session.isConnected()) {
+            throw new IllegalStateException("SSH 连接不可用，请先建立连接 connectionId=" + connectionId);
+        }
+
+        long start = System.currentTimeMillis();
+        long timeoutMs = Math.max(timeoutSeconds, 1) * 1000L;
+        long deadline = start + timeoutMs;
+
+        StringBuilder stdout = new StringBuilder();
+        StringBuilder stderr = new StringBuilder();
+        ChannelExec channel = null;
+
+        try {
+            channel = (ChannelExec) session.openChannel("exec");
+            channel.setCommand(command);
+
+            // 与 shell 通道保持一致：先取流再 connect，避免首批数据丢失
+            InputStream outStream = channel.getInputStream();
+            InputStream errStream = channel.getErrStream();
+
+            channel.connect((int) Math.min(timeoutMs, Integer.MAX_VALUE));
+
+            // stdout / stderr 各起一个读取线程，必须并发消费
+            Thread outReader = startStreamReader(outStream, stdout, "ssh-exec-stdout");
+            Thread errReader = startStreamReader(errStream, stderr, "ssh-exec-stderr");
+
+            // 等待通道关闭 = 命令执行完毕
+            boolean finished = waitForChannelClose(channel, deadline);
+            boolean timeout = !finished;
+            if (timeout) {
+                log.warn("SSH 命令执行超时，主动断开 command={} timeout={}s", command, timeoutSeconds);
+                try {
+                    channel.disconnect();
+                } catch (Exception ignored) {
+                    // 断开失败不影响返回结果
+                }
+            }
+
+            joinQuietly(outReader);
+            joinQuietly(errReader);
+
+            int exitCode = channel.getExitStatus();
+            long duration = System.currentTimeMillis() - start;
+
+            log.info("SSH exec 完成 command={} exitCode={} timeout={} duration={}ms stdoutLen={} stderrLen={}",
+                    command, exitCode, timeout, duration, stdout.length(), stderr.length());
+
+            return TerminalExecResult.builder()
+                    .command(command)
+                    .stdout(stdout.toString())
+                    .stderr(stderr.toString())
+                    .exitCode(exitCode)
+                    .timeout(timeout)
+                    .durationMs(duration)
+                    .build();
+
+        } catch (JSchException e) {
+            log.error("SSH exec 失败 command={} connectionId={}", command, connectionId, e);
+            throw new RuntimeException("执行 SSH 命令失败: " + e.getMessage(), e);
+        } catch (IOException e) {
+            log.error("SSH exec 流异常 command={} connectionId={}", command, connectionId, e);
+            throw new RuntimeException("执行 SSH 命令失败: " + e.getMessage(), e);
+        } finally {
+            if (channel != null && channel.isConnected()) {
+                try {
+                    channel.disconnect();
+                } catch (Exception ignored) {
+                    // 忽略关闭异常
+                }
+            }
+        }
+    }
+
+    /**
+     * 启动流读取线程（daemon，避免阻塞 JVM 退出）
+     */
+    private Thread startStreamReader(InputStream in, StringBuilder sink, String threadName) {
+        Thread thread = new Thread(() -> {
+            byte[] buf = new byte[4096];
+            try {
+                int len;
+                while ((len = in.read(buf)) != -1) {
+                    if (len > 0) {
+                        sink.append(new String(buf, 0, len, StandardCharsets.UTF_8));
+                    }
+                }
+            } catch (IOException e) {
+                // 通道被断开属于正常收尾，不作为错误处理
+                log.debug("exec 流读取结束 thread={} reason={}", threadName, e.getMessage());
+            }
+        }, threadName);
+        thread.setDaemon(true);
+        thread.start();
+        return thread;
+    }
+
+    /**
+     * 等待通道关闭（命令结束），超过 deadline 返回 false 表示超时
+     */
+    private boolean waitForChannelClose(ChannelExec channel, long deadline) {
+        while (!channel.isClosed()) {
+            if (System.currentTimeMillis() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 等待读取线程结束，最多等 1 秒（此时通道已断，流理论上已 EOF）
+     */
+    private void joinQuietly(Thread thread) {
+        try {
+            thread.join(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Override

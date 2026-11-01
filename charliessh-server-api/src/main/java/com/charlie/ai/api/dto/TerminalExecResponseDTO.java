@@ -17,4 +17,10 @@ public class TerminalExecResponseDTO {
     /** 命令输出 */
     private String output;
 
+    /** 命令退出码，0 表示成功，-1 表示服务端未回传 */
+    private Integer exitCode;
+
+    /** 是否执行成功 */
+    private Boolean success;
+
 }

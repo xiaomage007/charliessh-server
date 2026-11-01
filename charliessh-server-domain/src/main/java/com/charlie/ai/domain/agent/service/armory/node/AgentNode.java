@@ -67,6 +67,16 @@ public class AgentNode extends AbstractArmorySupport {
             } else {
                 log.warn("Agent [{}] 没有注册任何工具！", agentConfig.getName());
             }
+
+            // 限制单轮对话内的最大步数（工具调用 + 模型推理的循环次数）
+            // 没有这道闸门，一旦工具返回值不符合模型预期，模型会不断换着花样重试同一个目标，
+            // 表现为「一直执行」且永不收敛。
+            Integer maxSteps = aiAgentConfigTableVO.getModule().getChatModel().getMaxSteps();
+            if (maxSteps != null && maxSteps > 0) {
+                builder.maxSteps(maxSteps);
+                log.info("为 Agent [{}] 设置 maxSteps={}", agentConfig.getName(), maxSteps);
+            }
+
             LlmAgent llmAgent = builder.build();
             dynamicContext.getAgentGroup().put(agentConfig.getName(), llmAgent);
 

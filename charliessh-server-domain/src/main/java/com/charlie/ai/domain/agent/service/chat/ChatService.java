@@ -6,6 +6,7 @@ import com.charlie.ai.domain.agent.model.valobj.AiAgentRegisterVO;
 import com.charlie.ai.domain.agent.model.valobj.properties.AiAgentAutoConfigProperties;
 import com.charlie.ai.domain.agent.service.IChatService;
 import com.charlie.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
+import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import com.charlie.ai.types.enums.ResponseCode;
 import com.charlie.ai.types.exception.AppException;
 import com.google.adk.events.Event;
@@ -14,6 +15,7 @@ import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import io.reactivex.rxjava3.core.Flowable;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -28,6 +30,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author: Charlie
  * @date: 2026/10/14 9:37
  */
+@Slf4j
 @Service
 public class ChatService implements IChatService {
 
@@ -114,7 +117,49 @@ public class ChatService implements IChatService {
 
         Content userMsg = Content.fromParts(Part.fromText(message));
 
-        return runner.runAsync(userId, sessionId, userMsg);
+        // 未绑定终端会话：显式清理一次，避免读到上一次请求残留的会话 ID
+        return Flowable.defer(() -> {
+                    SshExecuteAdkTool.clearCurrentTerminalSession();
+                    return runner.runAsync(userId, sessionId, userMsg);
+                })
+                .doFinally(() -> SshExecuteAdkTool.clearCurrentTerminalSession());
+    }
+
+    @Override
+    public Flowable<Event> handleMessageStream(String agentId, String userId, String sessionId, String message, String terminalSessionId) {
+        AiAgentRegisterVO aiAgentRegisterVO = defaultArmoryFactory.getAiAgentRegisterVO(agentId);
+
+        if (null == aiAgentRegisterVO) {
+            throw new AppException(ResponseCode.E0001.getCode());
+        }
+        InMemoryRunner runner = aiAgentRegisterVO.getRunner();
+
+        Content userMsg = Content.fromParts(Part.fromText(message));
+
+        /*
+         * 终端会话 ID 通过 ThreadLocal 传给 executeCommand 工具。
+         *
+         * 【为什么用 defer 而不是直接 set】
+         * ADK 的 runAsync 返回的是 cold Flowable，真正的事件流在【订阅时】才开始。
+         * 如果在方法返回前就 set，而订阅发生在另一个线程上，
+         * 工具执行时就读不到这个值（InheritableThreadLocal 只在线程创建时继承一次）。
+         * 放进 defer 里 set，保证 set 与工具执行发生在同一个订阅线程上。
+         *
+         * 【为什么必须清理】
+         * Web 容器 / 线程池会复用线程。不清理的话，下一个请求会读到上一个请求残留的
+         * terminalSessionId，导致命令被发到【别人的服务器】上执行——这是安全问题。
+         * doFinally 覆盖正常结束、异常、取消三种收尾路径。
+         */
+        return Flowable.defer(() -> {
+                    if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
+                        log.info("设置终端会话ID: {}", terminalSessionId);
+                        SshExecuteAdkTool.setCurrentTerminalSession(terminalSessionId);
+                    } else {
+                        SshExecuteAdkTool.clearCurrentTerminalSession();
+                    }
+                    return runner.runAsync(userId, sessionId, userMsg);
+                })
+                .doFinally(() -> SshExecuteAdkTool.clearCurrentTerminalSession());
     }
 
     @Override

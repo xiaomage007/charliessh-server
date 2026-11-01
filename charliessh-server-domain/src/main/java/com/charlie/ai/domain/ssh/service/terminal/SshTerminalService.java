@@ -2,6 +2,7 @@ package com.charlie.ai.domain.ssh.service.terminal;
 
 import com.charlie.ai.domain.ssh.adapter.port.ISshSessionPort;
 import com.charlie.ai.domain.ssh.adapter.port.ITerminalSessionPort;
+import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
 import com.charlie.ai.domain.ssh.model.entity.TerminalSessionEntity;
 import com.charlie.ai.domain.ssh.service.ISshTerminalService;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 @Service
 public class SshTerminalService implements ISshTerminalService {
+
+    /** 默认命令执行超时（秒） */
+    public static final int DEFAULT_EXEC_TIMEOUT_SECONDS = 60;
 
     private final ISshSessionPort sshSessionService;
     private final ITerminalSessionPort terminalSessionService;
@@ -71,25 +75,47 @@ public class SshTerminalService implements ISshTerminalService {
 
     @Override
     public String executeCommand(String sessionId, String command) {
-        log.debug("执行命令 sessionId={} command={}", sessionId, command);
+        TerminalExecResult result = executeCommand(sessionId, command, DEFAULT_EXEC_TIMEOUT_SECONDS);
+        return result.getOutput();
+    }
+
+    /**
+     * 执行命令并返回完整结果
+     * <p>
+     * 【为什么不复用交互式 shell 通道】
+     * shell 通道是给前端 xterm.js 用的：写进去的是"用户按键"，读出来的是"屏幕内容"。
+     * 如果拿它执行 AI 的命令，会遇到三个必然的坑：
+     * <ol>
+     *     <li>PTY canonical 模式下必须写 {@code \n} 才会把该行提交给 shell，
+     *         否则命令根本不执行，终端只回显输入的字符；</li>
+     *     <li>shell 通道的 read 是「非阻塞快照」，write 之后立刻 read 拿到的是
+     *         上一条命令的残留输出，天然滞后一拍；</li>
+     *     <li>输出里混着回显、提示符、ANSI 控制序列，无法可靠判断成功与否。</li>
+     * </ol>
+     * exec 通道则是"提交命令 → 等它跑完 → 拿 stdout/stderr + 退出码"，
+     * 语义与 AI 的使用方式完全吻合。
+     */
+    @Override
+    public TerminalExecResult executeCommand(String sessionId, String command, int timeoutSeconds) {
+        log.debug("执行命令 sessionId={} command={} timeout={}s", sessionId, command, timeoutSeconds);
 
         // 1. 校验会话
         TerminalSessionEntity entity = sessionCache.get(sessionId);
         if (entity == null || !entity.isActive()) {
             throw new IllegalArgumentException("终端会话不存在或已关闭");
         }
+        if (command == null || command.trim().isEmpty()) {
+            throw new IllegalArgumentException("命令不能为空");
+        }
 
-        // 2. 写入命令
-        terminalSessionService.write(sessionId, command);
+        // 2. 通过 exec 通道执行，阻塞直到命令真正结束
+        TerminalExecResult result = terminalSessionService.execCommand(
+                entity.getConnectionId(), command, timeoutSeconds);
 
         // 3. 更新活跃时间
         entity.touch();
 
-        // 4. 读取输出
-        String output = terminalSessionService.read(sessionId);
-        log.debug("命令执行完成 sessionId={} outputLength={}", sessionId, output.length());
-
-        return output;
+        return result;
     }
 
     @Override

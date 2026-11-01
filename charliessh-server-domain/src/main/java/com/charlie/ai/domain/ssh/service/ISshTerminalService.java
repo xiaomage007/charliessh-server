@@ -1,6 +1,7 @@
 package com.charlie.ai.domain.ssh.service;
 
 
+import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
 import com.charlie.ai.domain.ssh.model.entity.TerminalSessionEntity;
 
 /**
@@ -21,12 +22,25 @@ public interface ISshTerminalService {
 
     /**
      * 执行命令并返回输出
+     * <p>
+     * 走 exec 通道（非交互式）：命令真正执行完才返回，输出与命令严格对应，
+     * 并携带真实退出码。
      *
      * @param sessionId 会话ID
      * @param command    命令内容
      * @return 命令执行后的终端输出
      */
     String executeCommand(String sessionId, String command);
+
+    /**
+     * 执行命令并返回完整结果（含 stdout / stderr / 退出码）
+     *
+     * @param sessionId      会话ID
+     * @param command        命令内容
+     * @param timeoutSeconds 执行超时（秒）
+     * @return 执行结果
+     */
+    TerminalExecResult executeCommand(String sessionId, String command, int timeoutSeconds);
 
     /**
      * 调整终端大小
