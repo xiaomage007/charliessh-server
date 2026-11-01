@@ -9,7 +9,7 @@ import com.charlie.ai.domain.ssh.model.entity.SshConnectionConfigEntity;
 import com.charlie.ai.domain.ssh.model.entity.SshConnectionEntity;
 import com.charlie.ai.domain.ssh.model.valobj.AuthTypeEnum;
 import com.charlie.ai.domain.ssh.model.valobj.ConnectionStatusEnum;
-import com.charlie.ai.domain.ssh.service.connection.ISshConnectionService;
+import com.charlie.ai.domain.ssh.service.ISshConnectionService;
 import com.charlie.ai.types.enums.ResponseCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;

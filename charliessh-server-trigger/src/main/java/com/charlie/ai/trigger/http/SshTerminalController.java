@@ -3,6 +3,7 @@ package com.charlie.ai.trigger.http;
 import com.charlie.ai.api.ISshTerminalApiService;
 import com.charlie.ai.api.dto.*;
 import com.charlie.ai.api.response.Response;
+import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
 import com.charlie.ai.domain.ssh.model.entity.TerminalSessionEntity;
 import com.charlie.ai.domain.ssh.service.ISshTerminalService;
 import com.charlie.ai.types.enums.ResponseCode;
@@ -20,6 +21,9 @@ import javax.annotation.Resource;
 @RequestMapping("/api/v1/ssh/terminal")
 @CrossOrigin(origins = "*")
 public class SshTerminalController implements ISshTerminalApiService {
+
+    /** exec 接口默认超时（秒） */
+    private static final int DEFAULT_EXEC_TIMEOUT_SECONDS = 60;
 
     @Resource
     private ISshTerminalService sshTerminalService;
@@ -93,11 +97,14 @@ public class SshTerminalController implements ISshTerminalApiService {
     @RequestMapping(value = "exec", method = RequestMethod.POST)
     public Response<TerminalExecResponseDTO> execCommand(@RequestBody TerminalExecRequestDTO requestDTO) {
         try {
-            String output = sshTerminalService.executeCommand(
-                    requestDTO.getSessionId(), requestDTO.getCommand());
+            // 走 exec 通道：命令真正执行完才返回，输出与命令严格对应，并带真实退出码
+            TerminalExecResult result = sshTerminalService.executeCommand(
+                    requestDTO.getSessionId(), requestDTO.getCommand(), DEFAULT_EXEC_TIMEOUT_SECONDS);
 
             TerminalExecResponseDTO response = TerminalExecResponseDTO.builder()
-                    .output(output)
+                    .output(result.getOutput())
+                    .exitCode(result.getExitCode())
+                    .success(result.isSuccess())
                     .build();
 
             return Response.<TerminalExecResponseDTO>builder()

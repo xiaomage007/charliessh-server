@@ -73,6 +73,14 @@ public class AiAgentConfigTableVO {
             private List<ToolMcp> toolMcpList;
             private List<ToolSkills> toolSkillsList;
 
+            /**
+             * 单轮对话内允许的最大步数（模型推理 + 工具调用的循环次数）
+             * <p>
+             * 用于兜底防止 Agent 在工具返回不符合预期时陷入无限重试。
+             * 不配置则沿用 ADK 默认行为（无上限）。
+             */
+            private Integer maxSteps;
+
             @Data
             public static class ToolMcp {
 

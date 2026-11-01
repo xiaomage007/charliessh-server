@@ -65,6 +65,14 @@
             <artifactId>junit</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- JUnit4 兼容引擎：项目现有用例是 JUnit4(@RunWith(SpringRunner.class))，
+             而 spring-boot-starter-test 默认只有 JUnit5，缺了它 surefire 会走
+             JUnit Platform provider，导致 JUnit4 用例被静默跳过（Tests run: 0） -->
+        <dependency>
+            <groupId>org.junit.vintage</groupId>
+            <artifactId>junit-vintage-engine</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt</artifactId>
@@ -173,7 +181,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <skipTests>true</skipTests>
+                    <skipTests>false</skipTests>
                     <testFailureIgnore>false</testFailureIgnore>
                     <includes>
                         <include>**/*Test.java</include>

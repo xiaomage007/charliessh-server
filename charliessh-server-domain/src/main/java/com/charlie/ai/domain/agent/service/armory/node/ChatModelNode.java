@@ -54,11 +54,14 @@ public class ChatModelNode extends AbstractArmorySupport {
 
         // 构建mcp服务（工厂）
         List<ToolCallback> toolCallbackList = new ArrayList<>();
-        for (AiAgentConfigTableVO.Module.ChatModel.ToolMcp toolMcp : toolMcpList) {
-            ToolMcpCreateService tooMcpCreateService = defaultMcpClientFactory.getTooMcpCreateService(toolMcp);
-            ToolCallback[] toolCallbacks = tooMcpCreateService.buildToolCallback(toolMcp);
-            toolCallbackList.addAll(List.of(toolCallbacks));
+        if (null != toolMcpList && !toolMcpList.isEmpty()) {
+            for (AiAgentConfigTableVO.Module.ChatModel.ToolMcp toolMcp : toolMcpList) {
+                ToolMcpCreateService tooMcpCreateService = defaultMcpClientFactory.getTooMcpCreateService(toolMcp);
+                ToolCallback[] toolCallbacks = tooMcpCreateService.buildToolCallback(toolMcp);
+                toolCallbackList.addAll(List.of(toolCallbacks));
+            }
         }
+
 
         // 构建skills服务
         if (null != toolSkillsList && !toolSkillsList.isEmpty()) {
