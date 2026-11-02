@@ -26,11 +26,15 @@ public class SshExecuteAdkTool {
     @Resource
     private ISshTerminalService sshTerminalService;
 
-    /** 单条命令执行超时（秒） */
+    /**
+     * 单条命令执行超时（秒）
+     */
     @Value("${ssh.agent.exec.timeout-seconds:60}")
     private int execTimeoutSeconds;
 
-    /** 工具回传给模型的输出上限（字符），超出部分截断，避免撑爆模型上下文 */
+    /**
+     * 工具回传给模型的输出上限（字符），超出部分截断，避免撑爆模型上下文
+     */
     @Value("${ssh.agent.exec.max-output-length:4000}")
     private int maxOutputLength;
 
@@ -138,6 +142,11 @@ public class SshExecuteAdkTool {
             "(?:exit code|exit status|exit with code|exited with code|return code|returned exit code)\\D{0,4}(\\d+)");
 
     /**
+     * 当前会话级终端会话ID（由 Controller 设置，优先级低于 ThreadLocal）
+     */
+    private static volatile String sessionTerminalSessionId;
+
+    /**
      * 写入当前线程的终端会话 ID。
      * 子线程在此之后被创建时，会通过 childValue 继承到该值。
      *
@@ -145,6 +154,7 @@ public class SshExecuteAdkTool {
      */
     public static void setCurrentTerminalSession(String terminalSessionId) {
         currentTerminalSession.set(terminalSessionId);
+        sessionTerminalSessionId = terminalSessionId;
         log.info("[ThreadLocal] 设置终端会话: thread={}, terminalSession={}", Thread.currentThread().getName(), terminalSessionId);
     }
 
@@ -164,11 +174,18 @@ public class SshExecuteAdkTool {
      */
     public static void clearCurrentTerminalSession() {
         currentTerminalSession.remove();
+        sessionTerminalSessionId = null;
     }
 
     public Map<String, Object> executeCommand(@Annotations.Schema(name = "command", description = "要执行的 Shell 命令，如: ls -la, apt install docker.io, docker --version") String command) {
         // 优先从 ThreadLocal 获取，支持异步线程继承
         String terminalSessionId = getCurrentSession();
+
+        // ThreadLocal 为空时回退到会话级变量（线程池场景下 ThreadLocal 可能失效）
+        if (terminalSessionId == null || terminalSessionId.isEmpty()) {
+            terminalSessionId = sessionTerminalSessionId;
+            log.info("[executeCommand] ThreadLocal 为空，回退到会话级变量: terminalSessionId={}", terminalSessionId);
+        }
 
         log.info("[executeCommand] thread={}, terminalSessionId={}, command={}", Thread.currentThread().getName(), terminalSessionId, command);
 
@@ -256,9 +273,9 @@ public class SshExecuteAdkTool {
      * 1) ANSI 控制序列：颜色、光标移动等，如 ESC[31m、ESC[?2004h；
      * 2) 提示符：root@host:/opt# 之类；
      * 3) 【命令回显】：shell 会把输入的命令原样打印回来。
-     *    第 3 类最致命 —— 执行 {@code grep error a.txt} 时输出里含 "error"，
-     *    执行 {@code cat makefile} 时输出里含 "makefile"，
-     *    不剔除就会把"命令自身携带的关键词"误判成错误。
+     * 第 3 类最致命 —— 执行 {@code grep error a.txt} 时输出里含 "error"，
+     * 执行 {@code cat makefile} 时输出里含 "makefile"，
+     * 不剔除就会把"命令自身携带的关键词"误判成错误。
      *
      * @param output  终端原始输出
      * @param command 本次执行的命令（用于剔除回显）
