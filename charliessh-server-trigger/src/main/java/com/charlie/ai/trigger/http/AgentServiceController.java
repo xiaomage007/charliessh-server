@@ -5,6 +5,7 @@ import com.charlie.ai.api.dto.*;
 import com.charlie.ai.api.response.Response;
 import com.charlie.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import com.charlie.ai.domain.agent.service.IChatService;
+import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import com.charlie.ai.types.enums.ResponseCode;
 import com.charlie.ai.types.exception.AppException;
 import lombok.extern.slf4j.Slf4j;
@@ -13,6 +14,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 
 import javax.annotation.Resource;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 /**
@@ -28,6 +30,9 @@ public class AgentServiceController implements IAgentService {
 
     @Resource
     private IChatService chatService;
+
+    @Resource
+    private SshExecuteAdkTool sshExecuteAdkTool;
 
     @RequestMapping(value = "query_ai_agent_config_list", method = RequestMethod.GET)
     @Override
@@ -134,7 +139,6 @@ public class AgentServiceController implements IAgentService {
     @RequestMapping(value = "chat_stream", method = RequestMethod.POST)
     @Override
     public ResponseBodyEmitter chatStream(@RequestBody ChatRequestDTO requestDTO) {
-        ResponseBodyEmitter emitter = new ResponseBodyEmitter(3 * 60 * 1000L);
         try {
             log.info("流式对话 agentId:{} userId:{} sessionId:{} terminalSessionId:{} message:{}",
                     requestDTO.getAgentId(), requestDTO.getUserId(), requestDTO.getSessionId(),
@@ -146,24 +150,54 @@ public class AgentServiceController implements IAgentService {
                 sessionId = chatService.createSession(requestDTO.getAgentId(), requestDTO.getUserId());
             }
 
-            // 传递终端会话ID
-            chatService.handleMessageStream(requestDTO.getAgentId(), requestDTO.getUserId(), sessionId, requestDTO.getMessage(), requestDTO.getTerminalSessionId())
-                    .subscribe(
-                            event -> {
-                                try {
-                                    emitter.send(event.stringifyContent());
-                                } catch (Exception e) {
-                                    log.error("流式对话发送失败", e);
-                                    emitter.completeWithError(e);
-                                }
-                            },
-                            emitter::completeWithError,
-                            emitter::complete
-                    );
+            // 创建 SSE 发射器（10 分钟超时，AI + SSH 命令执行可能需要较长时间）
+            ResponseBodyEmitter emitter = new ResponseBodyEmitter(10 * 60 * 1000L);
+
+            // 绑定终端会话到 ThreadLocal（核心！工具从这里取 terminalSessionId）
+            String terminalSessionId = requestDTO.getTerminalSessionId();
+            if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
+                SshExecuteAdkTool.setCurrentTerminalSession(terminalSessionId);
+            }
+
+            // 异步执行，避免阻塞 HTTP 线程
+            String finalSessionId = sessionId;
+            new Thread(() -> {
+                // 心跳保活线程：在 AI 处理期间定期发送 SSE 注释行，防止浏览器/proxy 超时断开
+                Thread heartbeatThread = new Thread(() -> {
+                    AtomicBoolean streaming = new AtomicBoolean(true);
+                    try {
+                        while (streaming.get()) {
+                            Thread.sleep(15000);
+                            try {
+                                emitter.send(": heartbeat\n\n");
+                            } catch (Exception e) {
+                                break;
+                            }
+                        }
+                    } catch (InterruptedException e) {
+                        // 正常退出
+                    }
+                }, "sse-heartbeat-" + finalSessionId);
+                heartbeatThread.setDaemon(true);
+                heartbeatThread.start();
+
+                try {
+
+                } catch (Exception e) {
+                    log.error("MVP 流式对话异常", e);
+
+                } finally {
+
+                }
+
+            }, "mvp-stream-" + sessionId).start();
+
+            return emitter;
         } catch (Exception e) {
             log.error("流式对话失败", e);
+            ResponseBodyEmitter emitter = new ResponseBodyEmitter();
             emitter.completeWithError(e);
+            return emitter;
         }
-        return emitter;
     }
 }
