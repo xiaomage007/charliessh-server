@@ -8,12 +8,15 @@ import com.charlie.ai.domain.agent.service.IChatService;
 import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import com.charlie.ai.types.enums.ResponseCode;
 import com.charlie.ai.types.exception.AppException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
 import javax.annotation.Resource;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -163,8 +166,8 @@ public class AgentServiceController implements IAgentService {
             String finalSessionId = sessionId;
             new Thread(() -> {
                 // 心跳保活线程：在 AI 处理期间定期发送 SSE 注释行，防止浏览器/proxy 超时断开
+                AtomicBoolean streaming = new AtomicBoolean(true);
                 Thread heartbeatThread = new Thread(() -> {
-                    AtomicBoolean streaming = new AtomicBoolean(true);
                     try {
                         while (streaming.get()) {
                             Thread.sleep(15000);
@@ -185,9 +188,19 @@ public class AgentServiceController implements IAgentService {
 
                 } catch (Exception e) {
                     log.error("MVP 流式对话异常", e);
-
+                    try {
+                        Map<String, Object> errorEvent = new HashMap<>();
+                        errorEvent.put("event", "error");
+                        errorEvent.put("content", e.getMessage());
+                        emitter.send(new ObjectMapper().writeValueAsString(errorEvent) + '\n');
+                    } catch (Exception ex) {
+                    }
+                    emitter.completeWithError(e);
                 } finally {
-
+                    streaming.set(false);
+                    heartbeatThread.interrupt();
+                    // 清理 ThreadLocal 和会话级变量
+                    SshExecuteAdkTool.clearCurrentTerminalSession();
                 }
 
             }, "mvp-stream-" + sessionId).start();
