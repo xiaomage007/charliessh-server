@@ -8,12 +8,18 @@ import com.charlie.ai.domain.agent.service.IChatService;
 import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
 import com.charlie.ai.types.enums.ResponseCode;
 import com.charlie.ai.types.exception.AppException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.adk.events.Event;
+import com.google.adk.events.EventActions;
+import io.reactivex.rxjava3.core.Flowable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
 import javax.annotation.Resource;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -162,9 +168,11 @@ public class AgentServiceController implements IAgentService {
             // 异步执行，避免阻塞 HTTP 线程
             String finalSessionId = sessionId;
             new Thread(() -> {
+                ObjectMapper objectMapper = new ObjectMapper();
+
                 // 心跳保活线程：在 AI 处理期间定期发送 SSE 注释行，防止浏览器/proxy 超时断开
+                AtomicBoolean streaming = new AtomicBoolean(true);
                 Thread heartbeatThread = new Thread(() -> {
-                    AtomicBoolean streaming = new AtomicBoolean(true);
                     try {
                         while (streaming.get()) {
                             Thread.sleep(15000);
@@ -183,11 +191,84 @@ public class AgentServiceController implements IAgentService {
 
                 try {
 
+                    Flowable<Event> events = chatService.handleMessageStream(requestDTO.getAgentId(), requestDTO.getUserId(), finalSessionId, requestDTO.getMessage(), terminalSessionId);
+
+                    StringBuilder textAccumulator = new StringBuilder();
+
+                    // 遍历事件流，转发为结构化 SSE JSON 事件
+                    events.blockingForEach(event -> {
+                        try {
+                            // 1.处理文本内容（AI 的回复文本）
+                            String eventText = event.stringifyContent();
+                            if (!eventText.isBlank()) {
+                                textAccumulator.append(eventText);
+
+                                Map<String, Object> textEvent = new HashMap<>();
+                                textEvent.put("event", "text");
+                                textEvent.put("content", eventText);
+                                textEvent.put("fullText", textAccumulator.toString());
+                                emitter.send(objectMapper.writeValueAsString(textEvent) + "\n");
+                                log.info("SSE text 事件已发送: length={}, fullTextLength={}, turnComplete={}",
+                                        eventText.length(), textAccumulator.length(), event.turnComplete());
+                            }
+                            // 2. 从 stateDelta 检测工具执行结果（SSH 命令输出）
+                            EventActions actions = event.actions();
+                            if (actions != null) {
+                                Map<String, Object> stateDelta = actions.stateDelta();
+                                if (stateDelta != null && !stateDelta.isEmpty()) {
+                                    for (Map.Entry<String, Object> entry : stateDelta.entrySet()) {
+                                        String stateKey = entry.getKey();
+                                        Object stateValue = entry.getValue();
+                                        if ("REMOVED".equals(stateValue)) continue;
+
+                                        String resultContent = stateValue != null ? stateValue.toString() : "";
+                                        // 去除 JSON 字符串外层引号号
+                                        if (resultContent.startsWith("\"") && resultContent.endsWith("\"") && resultContent.length() > 1) {
+                                            resultContent = resultContent.substring(1, resultContent.length() - 1);
+                                        }
+
+                                        String toolCallId = "call_" + stateKey + "_" + System.currentTimeMillis();
+
+                                        // 发送 tool_call 事件
+                                        Map<String, Object> toolCallEvent = new HashMap<>();
+                                        toolCallEvent.put("event", "tool_call");
+                                        toolCallEvent.put("toolCallId", toolCallId);
+                                        toolCallEvent.put("toolName", "executeCommand");
+                                        toolCallEvent.put("status", "success");
+                                        emitter.send(objectMapper.writeValueAsString(toolCallEvent) + "\n");
+
+                                        // 发送 tool_result 事件（SSH 命令输出）
+                                        Map<String, Object> toolResultEvent = new HashMap<>();
+                                        toolResultEvent.put("event", "tool_result");
+                                        toolResultEvent.put("toolCallId", toolCallId);
+                                        toolResultEvent.put("content", resultContent);
+                                        toolResultEvent.put("status", "success");
+                                        emitter.send(objectMapper.writeValueAsString(toolResultEvent) + "\n");
+
+                                        log.info("工具执行结果已发送: stateKey={}, resultLength={}", stateKey, resultContent.length());
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("SSE 发送异常: {}", e.getMessage());
+                        }
+                    });
+
                 } catch (Exception e) {
                     log.error("MVP 流式对话异常", e);
-
+                    try {
+                        Map<String, Object> errorEvent = new HashMap<>();
+                        errorEvent.put("event", "error");
+                        errorEvent.put("content", e.getMessage());
+                        emitter.send(new ObjectMapper().writeValueAsString(errorEvent) + '\n');
+                    } catch (Exception ignore) {
+                    }
+                    emitter.completeWithError(e);
                 } finally {
-
+                    streaming.set(false);
+                    heartbeatThread.interrupt();
+                    // 清理 ThreadLocal 和会话级变量
+                    SshExecuteAdkTool.clearCurrentTerminalSession();
                 }
 
             }, "mvp-stream-" + sessionId).start();
