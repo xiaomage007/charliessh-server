@@ -28,9 +28,15 @@ public interface ISshConnectionRepository {
     void deleteConnection(String connectionId);
 
     /**
-     * 根据连接ID查询
+     * 根据连接ID查询（凭证保持数据库原样，不解密）
      */
     SshConnectionEntity queryConnectionById(String connectionId);
+
+    /**
+     * 根据连接ID查询并解密凭证（仅用于建立 SSH 会话等确实需要明文凭证的场景）
+     * <p>凭证解密失败时抛出异常，异常信息中包含连接标识与处理建议。</p>
+     */
+    SshConnectionEntity queryConnectionWithCredential(String connectionId);
 
     /**
      * 查询用户的所有连接

@@ -24,6 +24,17 @@
         </encoder>
     </appender>
 
+    <!-- SQL 调试输出：放行 DEBUG，CONSOLE 的 info 阈值会把 MyBatis 的 SQL 日志挡掉 -->
+    <appender name="SQL_CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>debug</level>
+        </filter>
+        <encoder>
+            <pattern>%d{yy-MM-dd.HH:mm:ss.SSS} [%-16t] %-5p %-22c{0}%X{ServiceId} -%X{trace-id} %m%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
     <!--输出到文件-->
     <!-- 时间滚动输出 level为 INFO 日志 -->
     <appender name="INFO_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
@@ -100,6 +111,10 @@
     <!-- 开发环境：控制台打印 -->
     <springProfile name="dev">
         <logger name="com.nmys.view" level="debug"/>
+        <!-- MyBatis SQL 与参数：控制台实时打印，同时仍写入 log_info.log（additivity 默认 true） -->
+        <logger name="com.charlie.ai.infrastructure.dao" level="debug">
+            <appender-ref ref="SQL_CONSOLE"/>
+        </logger>
     </springProfile>
 
     <root level="info">

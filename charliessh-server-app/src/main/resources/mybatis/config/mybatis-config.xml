@@ -3,6 +3,15 @@
         PUBLIC "-//mybatis.org//DTD Config 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-config.dtd">
 <configuration>
+    <settings>
+        <!--
+            SQL 日志走 slf4j（接入 logback），而不是 StdOutImpl：
+            这样 SQL 的输出由 logging.level 控制，可单独开关、可落到日志文件。
+            需把 mapper 接口所在包（com.charlie.ai.infrastructure.dao）日志级别设为 debug 才会打印。
+        -->
+        <setting name="logImpl" value="org.apache.ibatis.logging.slf4j.Slf4jImpl"/>
+    </settings>
+
     <!-- 暂时未使用 文档：https://mybatis.org/mybatis-3/zh/configuration.html#typeAliases -->
     <typeAliases>
     </typeAliases>

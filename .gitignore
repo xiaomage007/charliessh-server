@@ -34,16 +34,6 @@ build/
 ### VS Code ###
 .vscode/
 
-### Mac OS ###
-.DS_Store
-/.idea/
-/.mvn/
-/data/
-/charliessh-server-app/data/
-/charliessh-server-app/.local-config
-/docs/draw.io/.$walissh-table-design.drawio.bkp
-/.walicode/memory/core_memory.json
-/.walicode/output.json
 
 ### 本地敏感配置（不提交） ###
 **/application-local.yml
