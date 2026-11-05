@@ -11,6 +11,7 @@ import com.charlie.ai.infrastructure.dao.po.SshConnectionConfigPO;
 import com.charlie.ai.infrastructure.dao.po.SshConnectionPO;
 import com.charlie.ai.infrastructure.security.PasswordEncryptor;
 import jakarta.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -20,6 +21,7 @@ import java.util.stream.Collectors;
  * SSH连接仓储实现
  *
  */
+@Slf4j
 @Repository
 public class SshConnectionRepository implements ISshConnectionRepository {
 
@@ -48,13 +50,19 @@ public class SshConnectionRepository implements ISshConnectionRepository {
     @Override
     public SshConnectionEntity queryConnectionById(String connectionId) {
         SshConnectionPO po = sshConnectionDAO.queryByConnectionId(connectionId);
-        return po != null ? toEntity(po) : null;
+        return po != null ? toEntity(po, false) : null;
+    }
+
+    @Override
+    public SshConnectionEntity queryConnectionWithCredential(String connectionId) {
+        SshConnectionPO po = sshConnectionDAO.queryByConnectionId(connectionId);
+        return po != null ? toEntity(po, true) : null;
     }
 
     @Override
     public List<SshConnectionEntity> queryConnectionListByUserId(String userId) {
         return sshConnectionDAO.queryListByUserId(userId).stream()
-                .map(this::toEntity)
+                .map(po -> toEntity(po, false))
                 .collect(Collectors.toList());
     }
 
@@ -77,13 +85,21 @@ public class SshConnectionRepository implements ISshConnectionRepository {
         String encryptedPrivateKey = entity.getPrivateKey();
         Integer encryptedFlag = entity.getEncrypted();
 
-        if (encryptedPassword != null && !encryptedPassword.isEmpty() && !passwordEncryptor.isEncrypted(encryptedPassword)) {
-            encryptedPassword = passwordEncryptor.encrypt(encryptedPassword);
-            encryptedFlag = 1;
+        if (encryptedPassword != null && !encryptedPassword.isEmpty()) {
+            if (!passwordEncryptor.isEncrypted(encryptedPassword)) {
+                encryptedPassword = passwordEncryptor.encrypt(encryptedPassword);
+                encryptedFlag = 1;
+            } else if (!passwordEncryptor.canDecrypt(encryptedPassword)) {
+                log.warn("连接[{}]的密码密文无法用当前密钥解密(密钥可能已变更)，将保留原密文，请重新录入密码", entity.getConnectionId());
+            }
         }
-        if (encryptedPrivateKey != null && !encryptedPrivateKey.isEmpty() && !passwordEncryptor.isEncrypted(encryptedPrivateKey)) {
-            encryptedPrivateKey = passwordEncryptor.encrypt(encryptedPrivateKey);
-            encryptedFlag = 1;
+        if (encryptedPrivateKey != null && !encryptedPrivateKey.isEmpty()) {
+            if (!passwordEncryptor.isEncrypted(encryptedPrivateKey)) {
+                encryptedPrivateKey = passwordEncryptor.encrypt(encryptedPrivateKey);
+                encryptedFlag = 1;
+            } else if (!passwordEncryptor.canDecrypt(encryptedPrivateKey)) {
+                log.warn("连接[{}]的私钥密文无法用当前密钥解密(密钥可能已变更)，将保留原密文，请重新录入私钥", entity.getConnectionId());
+            }
         }
 
         return SshConnectionPO.builder()
@@ -104,18 +120,21 @@ public class SshConnectionRepository implements ISshConnectionRepository {
                 .build();
     }
 
-    private SshConnectionEntity toEntity(SshConnectionPO po) {
+    /**
+     * PO -> Entity
+     *
+     * @param decryptCredential 是否解密凭证（密码/私钥）。
+     *                           列表、详情、更新等场景不需要明文凭证，不解密可避免
+     *                           单条脏数据导致整个列表查询失败；只有建立 SSH 会话时才解密。
+     */
+    private SshConnectionEntity toEntity(SshConnectionPO po, boolean decryptCredential) {
         // 解密密码和私钥
         String password = po.getPassword();
         String privateKey = po.getPrivateKey();
 
-        if (po.getEncrypted() != null && po.getEncrypted() == 1) {
-            if (password != null && !password.isEmpty()) {
-                password = passwordEncryptor.decrypt(password);
-            }
-            if (privateKey != null && !privateKey.isEmpty()) {
-                privateKey = passwordEncryptor.decrypt(privateKey);
-            }
+        if (decryptCredential && po.getEncrypted() != null && po.getEncrypted() == 1) {
+            password = decryptCredential(password, po.getConnectionId(), "密码");
+            privateKey = decryptCredential(privateKey, po.getConnectionId(), "私钥");
         }
 
         return SshConnectionEntity.builder()
@@ -134,6 +153,20 @@ public class SshConnectionRepository implements ISshConnectionRepository {
                 .createdAt(po.getCreatedAt())
                 .updatedAt(po.getUpdatedAt())
                 .build();
+    }
+
+    /**
+     * 解密凭证，失败时抛出带连接标识的可读异常
+     */
+    private String decryptCredential(String value, String connectionId, String label) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        try {
+            return passwordEncryptor.decrypt(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("连接[" + connectionId + "]" + label + "解密失败: " + e.getMessage(), e);
+        }
     }
 
     private SshConnectionConfigPO toConfigPO(SshConnectionConfigEntity entity) {

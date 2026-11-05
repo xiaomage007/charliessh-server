@@ -69,6 +69,8 @@ public class SshConnectionService implements ISshConnectionService {
         entity.validate();
 
         // 2. 检查连接是否存在，并获取原有数据
+        //    注意：此处不解密凭证，取到的是数据库原样值（密文），
+        //    原样回写可避免明文被二次加密
         SshConnectionEntity existing = repository.queryConnectionById(entity.getConnectionId());
         if (existing == null) {
             throw new IllegalArgumentException("连接不存在");
@@ -127,8 +129,8 @@ public class SshConnectionService implements ISshConnectionService {
 
     @Override
     public boolean connect(String connectionId) {
-        // 1. 查询连接信息
-        SshConnectionEntity entity = repository.queryConnectionById(connectionId);
+        // 1. 查询连接信息（需要明文凭证用于 SSH 认证）
+        SshConnectionEntity entity = repository.queryConnectionWithCredential(connectionId);
         if (entity == null) {
             throw new IllegalArgumentException("连接不存在");
         }

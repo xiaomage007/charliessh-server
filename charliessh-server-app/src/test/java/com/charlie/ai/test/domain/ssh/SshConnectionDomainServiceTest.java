@@ -5,6 +5,7 @@ import com.charlie.ai.domain.ssh.model.entity.SshConnectionEntity;
 import com.charlie.ai.domain.ssh.model.valobj.AuthTypeEnum;
 import com.charlie.ai.domain.ssh.model.valobj.ConnectionStatusEnum;
 import com.charlie.ai.domain.ssh.service.ISshConnectionService;
+import com.charlie.ai.infrastructure.security.PasswordEncryptor;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Assert;
 import org.junit.Test;
@@ -172,8 +173,9 @@ public class SshConnectionDomainServiceTest {
         Assert.assertEquals("端口应已更新", Integer.valueOf(2222), result.getPort());
         Assert.assertEquals("用户名应已更新", "updateduser", result.getUsername());
         Assert.assertEquals("认证类型应已更新", AuthTypeEnum.PRIVATE_KEY, result.getAuthType());
-        // 密码留空时应保留原值
-        Assert.assertEquals("密码应保留原值", "oldPassword", result.getPassword());
+        // 密码留空时应保留原值（库中以密文存储，取出后解密校验）
+        Assert.assertNotNull("密码应保留原值", result.getPassword());
+        Assert.assertEquals("密码应保留原值", "oldPassword", new PasswordEncryptor().decrypt(result.getPassword()));
 
         // 验证高级配置已更新
         SshConnectionConfigEntity configResult = sshConnectionDomainService.getConnectionConfig(connectionId);
