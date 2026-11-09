@@ -92,6 +92,31 @@ public abstract class AbstractAIAgentReActSupport extends AbstractMultiThreadStr
         currentTerminalSession.remove();
     }
 
+    /**
+     * 绑定会话与终端会话
+     */
+    protected static void bindTerminalSession(String sessionId, String terminalSessionId) {
+        if (sessionId != null && terminalSessionId != null) {
+            sessionTerminalMapping.put(sessionId, terminalSessionId);
+        }
+    }
+
+    /**
+     * 获取会话绑定的终端会话 ID
+     */
+    protected static String getTerminalSession(String sessionId) {
+        return sessionId != null ? sessionTerminalMapping.get(sessionId) : null;
+    }
+
+    /**
+     * 解绑会话与终端会话
+     */
+    protected static void unbindTerminalSession(String sessionId) {
+        if (sessionId != null) {
+            sessionTerminalMapping.remove(sessionId);
+        }
+    }
+
 
 
 }
