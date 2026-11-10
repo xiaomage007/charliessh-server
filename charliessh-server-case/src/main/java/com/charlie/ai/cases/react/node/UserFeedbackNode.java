@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * @Date: 2026/11/10 7:42
  */
 @Slf4j
-@Component("userFeedbackNode")
+@Component("reactUserFeedbackNode")
 public class UserFeedbackNode extends AbstractAIAgentReActSupport {
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO chatRequestDTO, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
