@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * @Date: 2026/11/10 7:42
  */
 @Slf4j
-@Component("loopDecisionNode")
+@Component("reactLoopDecisionNode")
 public class LoopDecisionNode extends AbstractAIAgentReActSupport {
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {

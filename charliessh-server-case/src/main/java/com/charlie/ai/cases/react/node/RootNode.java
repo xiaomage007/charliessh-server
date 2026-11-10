@@ -89,6 +89,6 @@ public class RootNode extends AbstractAIAgentReActSupport {
 
     @Override
     public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
-        return getBean("AiCallNode");
+        return getBean("reactAiCallNode");
     }
 }

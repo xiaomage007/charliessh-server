@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * @Date: 2026/11/10 7:38
  */
 @Slf4j
-@Component("toolCallNode")
+@Component("reactToolCallNode")
 public class ToolCallNode extends AbstractAIAgentReActSupport {
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
