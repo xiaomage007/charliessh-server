@@ -224,9 +224,33 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
     }
 
     @Override
-    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(ChatRequestDTO requestParameter,
-                                                                                                   DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
-        return null;
+    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(
+            ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+
+        // 检查是否应该终止
+        String stopReason = dynamicContext.getStopReason();
+        if (stopReason != null) {
+            log.info("检测到终止条件: {}, 路由到 UserFeedbackNode", stopReason);
+            return getBean("reactUserFeedbackNode");
+        }
+        // 检查是否达到最大步数
+        if (dynamicContext.getStep() >= dynamicContext.getMaxSteps()) {
+            log.info("达到最大步数 {}, 路由到 UserFeedbackNode", dynamicContext.getMaxSteps());
+            dynamicContext.setStopReason("max_steps");
+            return getBean("reactUserFeedbackNode");
+        }
+
+        // 检查本轮是否有工具调用（从 stateDelta 检测到的）
+        if (!dynamicContext.getCurrentToolCalls().isEmpty()) {
+            log.info("检测到 {} 个工具调用，路由到 ToolCallNode",
+                     dynamicContext.getCurrentToolCalls().size());
+            return getBean("reactToolCallNode");
+        }
+
+        // 无工具调用 → ReAct 循环完成
+        log.info("无工具调用，ReAct 循环完成，路由到 LoopDecisionNode");
+        return getBean("reactLoopDecisionNode");
     }
 
     // ═══════════════════════════════════════════════════════════════
