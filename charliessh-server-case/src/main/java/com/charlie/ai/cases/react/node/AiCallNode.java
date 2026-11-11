@@ -8,6 +8,8 @@ import com.charlie.ai.cases.react.factory.DefaultReActFactory;
 import com.charlie.ai.domain.agent.model.valobj.AiAgentRegisterVO;
 import com.charlie.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
 import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
+import com.google.adk.agents.RunConfig;
+import com.google.adk.events.Event;
 import com.google.adk.runner.InMemoryRunner;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
 import javax.annotation.Resource;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -58,7 +61,8 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
 
 
     @Override
-    protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+    protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
+                                     DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
         log.info("ReAct AiCallNode - 开始 AI 调用，第 {} 步", dynamicContext.getStep() + 1);
         String agentId = dynamicContext.getAgentId();
 
@@ -83,7 +87,10 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
         }
 
         // 5. 构建用户消息
-        Content userContent = Content.builder().role("user").parts(Part.builder().text(lastUserMessage).build()).build();
+        Content userContent = Content.builder()
+                                     .role("user")
+                                     .parts(Part.builder().text(lastUserMessage).build())
+                                     .build();
         // 6. 重置 ReAct 循环标志
         dynamicContext.setStopReason(null);
         dynamicContext.setErrorMessage(null);
@@ -95,16 +102,46 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
         boolean hasError = false;
         StringBuilder errorBuilder = new StringBuilder();
 
-        log.info("调用 ADK Runner，用户消息: {}", lastUserMessage.length() > 200
-                ? lastUserMessage.substring(0, 200) + "..." : lastUserMessage);
+        log.info("调用 ADK Runner，用户消息: {}",
+                lastUserMessage.length() > 200 ? lastUserMessage.substring(0, 200) + "..." : lastUserMessage);
 
+        try {
+            // ADK Runner 会自动执行工具（SpringAI ChatModel.call() 内部执行）
+            // 事件流中 event.functionCalls() 为空，但 event.actions().stateDelta() 包含工具结果
+            Iterator<Event> events = runner.runAsync(dynamicContext.getUserId(),
+                    dynamicContext.getSessionId(),
+                    userContent,
+                    RunConfig.builder().build()).blockingIterable().iterator();
+            int eventCount = 0;
+            while (events.hasNext()){
+                Event event = events.next();
+                eventCount++;
+                // 7.1 处理文本内容（模型的响应文本，包括工具调用后的总结）
 
+            }
+
+            log.info("ADK Runner 事件流处理完成，共 {} 个事件", eventCount);
+
+        } catch (Exception e) {
+            log.error("ADK Runner 调用失败", e);
+            hasError = true;
+            errorBuilder.append("ADK Runner error: ").append(e.getMessage());
+            dynamicContext.setErrorMessage(errorBuilder.toString());
+            dynamicContext.setStopReason("error");
+        } finally {
+            // 清除终端会话绑定
+            if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
+                SshExecuteAdkTool.clearCurrentTerminalSession();
+            }
+
+        }
 
         return null;
     }
 
     @Override
-    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(ChatRequestDTO requestParameter,
+                                                                                                   DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
         return null;
     }
 
@@ -115,7 +152,8 @@ public class AiCallNode extends AbstractAIAgentReActSupport {
     /**
      * 获取最新用户消息
      */
-    private String getLastUserMessage(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) {
+    private String getLastUserMessage(ChatRequestDTO requestParameter,
+                                      DefaultReActFactory.DynamicContext dynamicContext) {
         if (requestParameter.getMessage() != null && !requestParameter.getMessage().isEmpty()) {
             return requestParameter.getMessage();
         }
