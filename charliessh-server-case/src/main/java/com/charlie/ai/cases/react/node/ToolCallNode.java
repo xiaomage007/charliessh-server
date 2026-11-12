@@ -5,6 +5,8 @@ import com.charlie.ai.api.dto.ChatRequestDTO;
 import com.charlie.ai.api.dto.ReActResultDTO;
 import com.charlie.ai.cases.react.AbstractAIAgentReActSupport;
 import com.charlie.ai.cases.react.factory.DefaultReActFactory;
+import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
@@ -48,6 +50,8 @@ import java.util.Map;
 @Component("reactToolCallNode")
 public class ToolCallNode extends AbstractAIAgentReActSupport {
 
+    @Resource
+    private SshExecuteAdkTool sshExecuteAdkTool;
 
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
@@ -140,6 +144,72 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
 
 
+    // ═══════════════════════════════════════════════════════════════
+    //  工具执行
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 根据工具名称和参数执行对应的工具
+     */
+    private String executeTool(String toolName, String argsStr) throws Exception {
+        log.info("手动执行工具: name={}, args={}", toolName, argsStr);
+
+        return switch (toolName) {
+            case "executeCommand", "execute_command", "run_command" -> executeSshTool(argsStr);
+            default -> {
+                log.warn("未知工具: {}", toolName);
+                yield "Unknown tool: " + toolName + ". Available tools: executeCommand";
+            }
+        };
+    }
+
+    /**
+     * 执行 SSH 工具
+     * <p>调用 SshExecuteAdkTool.executeCommand() 执行 SSH 命令
+     */
+    private String executeSshTool(String argsStr) {
+        // 1. 解析参数
+        String command = parseToolArg(argsStr, "command");
+        if (command == null || command.isBlank()) {
+            return "Error: missing 'command' argument";
+        }
+
+        // 2. 执行 SSH 命令
+        Map<String, Object> result = sshExecuteAdkTool.executeCommand(command);
+
+        //3. 格式化结果
+        return formatSshResult(result);
+    }
+
+    /**
+     * 格式化 SSH 执行结果
+     */
+    private String formatSshResult(Map<String, Object> result) {
+        if (result == null) {
+            return "No result";
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        Object output = result.get("output");
+        if (output != null && !output.toString().isEmpty()) {
+            sb.append(output);
+        }
+
+        Object error = result.get("error");
+        if (error != null && !error.toString().isEmpty()) {
+            if (!sb.isEmpty()) sb.append("\n");
+            sb.append("[ERROR] ").append(error);
+        }
+
+        Object exitCode = result.get("exitCode");
+        if (exitCode != null) {
+            if (!sb.isEmpty()) sb.append("\n");
+            sb.append("[Exit code: ").append(exitCode).append("]");
+        }
+
+        return !sb.isEmpty() ? sb.toString() : "Command executed with no output";
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  辅助方法
