@@ -193,6 +193,11 @@
                 <artifactId>charliessh-server-trigger</artifactId>
                 <version>1.0</version>
             </dependency>
+            <dependency>
+                <groupId>com.charlie.ai</groupId>
+                <artifactId>charliessh-server-case</artifactId>
+                <version>1.0</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <build>
