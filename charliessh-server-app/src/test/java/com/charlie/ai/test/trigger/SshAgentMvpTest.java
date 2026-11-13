@@ -33,6 +33,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 import java.util.Scanner;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -68,28 +69,38 @@ import java.util.concurrent.TimeoutException;
 @SpringBootTest
 public class SshAgentMvpTest {
 
-//    private static final String SSH_HOST = "更换为你的服务器IP 81.70.245.73";
-    private static final String SSH_HOST = "115.159.150.103";
-    private static final int SSH_PORT = 22;
-    private static final String SSH_USERNAME = "ubuntu";
-//    private static final String SSH_PASSWORD = "更换为你的服务器密码";
-    private static final String SSH_PASSWORD = "mahui19871@@1";
+    private static final Properties SSH_CONFIG = loadSshConfig();
+    private static final String SSH_HOST = SSH_CONFIG.getProperty("ssh.host");
+    private static final int SSH_PORT = Integer.parseInt(SSH_CONFIG.getProperty("ssh.port", "22"));
+    private static final String SSH_USERNAME = SSH_CONFIG.getProperty("ssh.username");
+    private static final String SSH_PASSWORD = SSH_CONFIG.getProperty("ssh.password");
 
     // Agent 配置（对应 ssh-agent.yml 中的 agent-id）
     private static final String AGENT_ID = "100000";
     private static final String USER_ID = "mvp";
 
-    /** 运行模式：auto（默认）/ interactive / script */
+    /**
+     * 运行模式：auto（默认）/ interactive / script
+     */
     private static final String MODE_PROPERTY = "ssh.agent.mode";
-    /** 指令文件路径：系统属性优先，其次环境变量 */
+    /**
+     * 指令文件路径：系统属性优先，其次环境变量
+     */
     private static final String CMD_FILE_PROPERTY = "ssh.agent.cmdFile";
     private static final String CMD_FILE_ENV = "SSH_AGENT_CMD_FILE";
-    /** 交互模式等待一行的超时秒数，0 = 无限等待 */
-    private static final int INPUT_TIMEOUT_SEC = Integer.getInteger("ssh.agent.inputTimeoutSec", 30);
-    /** classpath 下内置的默认指令脚本 */
+    /**
+     * 交互模式等待一行的超时秒数，0 = 无限等待
+     */
+    private static final int INPUT_TIMEOUT_SEC = Integer.getInteger("ssh.agent.inputTimeoutSec",
+                                                                    30);
+    /**
+     * classpath 下内置的默认指令脚本
+     */
     private static final String DEFAULT_SCRIPT_RESOURCE = "ssh-agent-commands.txt";
 
-    /** 内置默认指令（连 classpath 脚本都读不到时的最后兜底） */
+    /**
+     * 内置默认指令（连 classpath 脚本都读不到时的最后兜底）
+     */
     private static final List<String> BUILT_IN_COMMANDS = List.of(
             "查看服务器系统信息，包括操作系统版本、CPU、内存",
             "检查 docker 是否安装",
@@ -105,17 +116,47 @@ public class SshAgentMvpTest {
     @Resource
     private IChatService chatService;
 
-    /** 整个 JVM 内只建立一次 SSH 连接，三个测试方法共用 */
+    /**
+     * 整个 JVM 内只建立一次 SSH 连接，三个测试方法共用
+     */
     private static boolean initialized;
-    /** 连接ID（createConnection 后自动生成） */
+    /**
+     * 连接ID（createConnection 后自动生成）
+     */
     private static String connectionId;
-    /** 终端会话ID（openTerminal 后自动生成） */
+    /**
+     * 终端会话ID（openTerminal 后自动生成）
+     */
     private static String terminalSessionId;
-    /** 对话会话ID（createSession 后自动生成） */
+    /**
+     * 对话会话ID（createSession 后自动生成）
+     */
     private static String chatSessionId;
-    /** 用于类级别清理的服务引用 */
+    /**
+     * 用于类级别清理的服务引用
+     */
     private static ISshConnectionService cleanupConnectionService;
     private static ISshTerminalService cleanupTerminalService;
+
+    /**
+     * 从 classpath:ssh-config.local 读取 SSH 连接配置
+     * <p>
+     * 该文件不提交到 Git（已在 .gitignore 中排除），使用前请从 ssh-config.local_bak 复制并填写真实信息。
+     */
+    private static Properties loadSshConfig() {
+        Properties props = new Properties();
+        try (InputStream is = SshAgentReActTest.class.getClassLoader()
+                                                     .getResourceAsStream("ssh-config.local")) {
+            if (is == null) {
+                throw new RuntimeException(
+                        "未找到 ssh-config.local 文件！请复制 src/test/resources/ssh-config.local_bak 为 ssh-config.local 并填写服务器信息。");
+            }
+            props.load(is);
+        } catch (Exception e) {
+            throw new RuntimeException("加载 ssh-config.local 失败: " + e.getMessage(), e);
+        }
+        return props;
+    }
 
     /**
      * 初始化：创建连接 → 建立SSH → 打开终端 → 创建对话会话 → 绑定ThreadLocal
@@ -132,7 +173,7 @@ public class SshAgentMvpTest {
     private synchronized void initOnce() {
         if (initialized) {
             log.info("复用已建立的会话 connectionId={}, terminalSessionId={}, chatSessionId={}",
-                    connectionId, terminalSessionId, chatSessionId);
+                     connectionId, terminalSessionId, chatSessionId);
             return;
         }
 
@@ -327,7 +368,8 @@ public class SshAgentMvpTest {
         // interactive / auto：尝试从控制台读输入
         boolean completed = runInteractiveMode(forceInteractive ? 0 : INPUT_TIMEOUT_SEC);
         if (!completed) {
-            log.warn("[模式] 标准输入不可用（EOF 或等待 {} 秒超时），自动降级为脚本模式", INPUT_TIMEOUT_SEC);
+            log.warn("[模式] 标准输入不可用（EOF 或等待 {} 秒超时），自动降级为脚本模式",
+                     INPUT_TIMEOUT_SEC);
             runScriptMode();
         }
     }
@@ -392,7 +434,8 @@ public class SshAgentMvpTest {
 
         List<String> commands = readCommandsFromClasspath();
         if (!commands.isEmpty()) {
-            log.info("[脚本] 从 classpath:{} 读取 {} 条指令", DEFAULT_SCRIPT_RESOURCE, commands.size());
+            log.info("[脚本] 从 classpath:{} 读取 {} 条指令", DEFAULT_SCRIPT_RESOURCE,
+                     commands.size());
             return commands;
         }
 
@@ -447,11 +490,13 @@ public class SshAgentMvpTest {
      */
     private List<String> readCommandsFromClasspath() {
         List<String> commands = new ArrayList<>();
-        try (InputStream in = getClass().getClassLoader().getResourceAsStream(DEFAULT_SCRIPT_RESOURCE)) {
+        try (InputStream in = getClass().getClassLoader()
+                                        .getResourceAsStream(DEFAULT_SCRIPT_RESOURCE)) {
             if (in == null) {
                 return commands;
             }
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(in, StandardCharsets.UTF_8))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     String trimmed = line.trim();
@@ -495,7 +540,8 @@ public class SshAgentMvpTest {
             return null;
         } catch (ExecutionException e) {
             // EOF 时 Scanner.nextLine 抛 NoSuchElementException
-            log.info("[交互] 标准输入已结束（EOF）: {}", e.getCause() == null ? e.getMessage() : e.getCause().getMessage());
+            log.info("[交互] 标准输入已结束（EOF）: {}",
+                     e.getCause() == null ? e.getMessage() : e.getCause().getMessage());
             return null;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -537,17 +583,17 @@ public class SshAgentMvpTest {
      */
     private void printBanner() {
         System.out.println("""
-
-                ==================== SSH Agent 控制台 ====================
-                输入方式（优先级从高到低）：
-                  1) 脚本模式：-Dssh.agent.cmdFile=<文件路径>（或环境变量 SSH_AGENT_CMD_FILE）
-                     每行一条指令，# 开头为注释；示例：src/test/resources/ssh-agent-commands.txt
-                  2) 交互模式：在本控制台直接输入自然语言后回车，输入 exit 退出
-                     提示：IDEA 的 JUnit 运行配置默认没有可写 stdin，
-                           请改用 Application 类型运行本类的 main 方法，控制台即可输入
-                  3) 兜底模式：stdin 不可用（EOF）或等待超时后，自动执行内置默认指令
-                可调参数：-Dssh.agent.mode=auto|interactive|script、-Dssh.agent.inputTimeoutSec=30
-                ===========================================================
-                """);
+                                   
+                                   ==================== SSH Agent 控制台 ====================
+                                   输入方式（优先级从高到低）：
+                                     1) 脚本模式：-Dssh.agent.cmdFile=<文件路径>（或环境变量 SSH_AGENT_CMD_FILE）
+                                        每行一条指令，# 开头为注释；示例：src/test/resources/ssh-agent-commands.txt
+                                     2) 交互模式：在本控制台直接输入自然语言后回车，输入 exit 退出
+                                        提示：IDEA 的 JUnit 运行配置默认没有可写 stdin，
+                                              请改用 Application 类型运行本类的 main 方法，控制台即可输入
+                                     3) 兜底模式：stdin 不可用（EOF）或等待超时后，自动执行内置默认指令
+                                   可调参数：-Dssh.agent.mode=auto|interactive|script、-Dssh.agent.inputTimeoutSec=30
+                                   ===========================================================
+                                   """);
     }
 }

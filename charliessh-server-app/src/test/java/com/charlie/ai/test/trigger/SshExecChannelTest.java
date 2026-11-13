@@ -17,6 +17,9 @@ import org.springframework.test.context.junit4.SpringRunner;
 
 import javax.annotation.Resource;
 
+import java.io.InputStream;
+import java.util.Properties;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -43,10 +46,11 @@ import static org.junit.Assert.assertTrue;
 @SpringBootTest
 public class SshExecChannelTest {
 
-    private static final String SSH_HOST = "115.159.150.103";
-    private static final int SSH_PORT = 22;
-    private static final String SSH_USERNAME = "ubuntu";
-    private static final String SSH_PASSWORD = "mahui19871@@1";
+    private static final Properties SSH_CONFIG = loadSshConfig();
+    private static final String SSH_HOST = SSH_CONFIG.getProperty("ssh.host");
+    private static final int SSH_PORT = Integer.parseInt(SSH_CONFIG.getProperty("ssh.port", "22"));
+    private static final String SSH_USERNAME = SSH_CONFIG.getProperty("ssh.username");
+    private static final String SSH_PASSWORD = SSH_CONFIG.getProperty("ssh.password");
 
     @Resource
     private ISshConnectionService sshConnectionService;
@@ -58,9 +62,31 @@ public class SshExecChannelTest {
     private static String terminalSessionId;
     private static boolean initialized;
 
-    /** 类级别清理用的服务引用（@AfterClass 是静态方法，拿不到实例字段） */
+    /**
+     * 类级别清理用的服务引用（@AfterClass 是静态方法，拿不到实例字段）
+     */
     private static ISshConnectionService cleanupConnectionService;
     private static ISshTerminalService cleanupTerminalService;
+
+    /**
+     * 从 classpath:ssh-config.local 读取 SSH 连接配置
+     * <p>
+     * 该文件不提交到 Git（已在 .gitignore 中排除），使用前请从 ssh-config.local_bak 复制并填写真实信息。
+     */
+    private static Properties loadSshConfig() {
+        Properties props = new Properties();
+        try (InputStream is = SshAgentReActTest.class.getClassLoader()
+                                                     .getResourceAsStream("ssh-config.local")) {
+            if (is == null) {
+                throw new RuntimeException(
+                        "未找到 ssh-config.local 文件！请复制 src/test/resources/ssh-config.local_bak 为 ssh-config.local 并填写服务器信息。");
+            }
+            props.load(is);
+        } catch (Exception e) {
+            throw new RuntimeException("加载 ssh-config.local 失败: " + e.getMessage(), e);
+        }
+        return props;
+    }
 
     @Before
     public void init() {
@@ -109,13 +135,14 @@ public class SshExecChannelTest {
         TerminalExecResult result = sshTerminalService.executeCommand(
                 terminalSessionId, "echo hello-exec-world", 30);
 
-        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(), result.getExitCode());
+        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(),
+                 result.getExitCode());
 
         assertEquals(0, result.getExitCode());
         assertTrue(result.isSuccess());
         assertFalse(result.isTimeout());
         assertTrue("stdout 应包含命令输出，实际: " + result.getStdout(),
-                result.getStdout().contains("hello-exec-world"));
+                   result.getStdout().contains("hello-exec-world"));
     }
 
     /**
@@ -133,11 +160,11 @@ public class SshExecChannelTest {
 
         assertTrue(first.getStdout().contains("first-cmd-marker"));
         assertFalse("第一条命令不应包含第二条的输出，实际: " + first.getStdout(),
-                first.getStdout().contains("second-cmd-marker"));
+                    first.getStdout().contains("second-cmd-marker"));
 
         assertTrue(second.getStdout().contains("second-cmd-marker"));
         assertFalse("第二条命令不应包含第一条的输出，实际: " + second.getStdout(),
-                second.getStdout().contains("first-cmd-marker"));
+                    second.getStdout().contains("first-cmd-marker"));
     }
 
     /**
@@ -152,7 +179,7 @@ public class SshExecChannelTest {
                 terminalSessionId, "echo " + marker, 30);
 
         assertEquals("输出里不应出现命令回显，marker 只该出现一次，实际: " + result.getStdout(),
-                1, countOccurrences(result.getStdout(), marker));
+                     1, countOccurrences(result.getStdout(), marker));
     }
 
     /**
@@ -163,7 +190,8 @@ public class SshExecChannelTest {
         TerminalExecResult result = sshTerminalService.executeCommand(
                 terminalSessionId, "command_that_does_not_exist_zzz", 30);
 
-        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(), result.getExitCode());
+        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(),
+                 result.getExitCode());
 
         assertEquals(127, result.getExitCode());
         assertFalse(result.isSuccess());
@@ -178,12 +206,13 @@ public class SshExecChannelTest {
         TerminalExecResult result = sshTerminalService.executeCommand(
                 terminalSessionId, "cat /nonexistent_file_zzz_123", 30);
 
-        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(), result.getExitCode());
+        log.info("stdout={} stderr={} exitCode={}", result.getStdout(), result.getStderr(),
+                 result.getExitCode());
 
         assertNotEquals(0, result.getExitCode());
         assertFalse(result.isSuccess());
         assertTrue("stderr 应包含错误描述，实际: " + result.getStderr(),
-                result.getStderr().contains("No such file"));
+                   result.getStderr().contains("No such file"));
     }
 
     /**
@@ -192,10 +221,12 @@ public class SshExecChannelTest {
     @Test
     public void test_timeoutBreaksLongCommand() {
         long start = System.currentTimeMillis();
-        TerminalExecResult result = sshTerminalService.executeCommand(terminalSessionId, "sleep 30", 3);
+        TerminalExecResult result = sshTerminalService.executeCommand(terminalSessionId, "sleep 30",
+                                                                      3);
         long cost = System.currentTimeMillis() - start;
 
-        log.info("timeout={} duration={}ms cost={}ms", result.isTimeout(), result.getDurationMs(), cost);
+        log.info("timeout={} duration={}ms cost={}ms", result.isTimeout(), result.getDurationMs(),
+                 cost);
 
         assertTrue("应标记为超时", result.isTimeout());
         assertFalse("超时不应算成功", result.isSuccess());
