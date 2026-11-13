@@ -56,7 +56,32 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
                                      DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+        List<Map<String, Object>> toolCalls = dynamicContext.getCurrentToolCalls();
+        List<Map<String, Object>> toolResults = dynamicContext.getCurrentToolResults();
 
+        if (toolCalls == null || toolCalls.isEmpty()) {
+            log.info("ReAct ToolCallNode - 无工具调用，跳过");
+            return router(requestParameter, dynamicContext);
+        }
+
+        log.info("ReAct ToolCallNode - 处理 {} 个工具调用，已有 {} 个结果",
+                 toolCalls.size(), toolResults != null ? toolResults.size() : 0);
+
+        ResponseBodyEmitter emitter = dynamicContext.getEmitter();
+
+        // 检查是否已有 ADK 自动执行的结果（FunctionResponse 已返回）
+        boolean adkAutoExecuted = toolResults != null && !toolResults.isEmpty();
+
+        // 这种场景就是用户的配置的 LLM 质量不高的时候，一种鲁棒设计，尽量的增强可靠性
+        if (adkAutoExecuted) {
+            // ─── ADK 自动执行模式 ───
+            log.info("工具已被 ADK 自动执行，处理已有结果");
+            handleAdkToolResults(dynamicContext, toolCalls, toolResults);
+        } else {
+            // ─── 手动执行模式 ───
+            log.info("工具未执行，手动执行");
+            handleManualToolExecution(dynamicContext, toolCalls, emitter);
+        }
 
         // 路由
         return router(requestParameter, dynamicContext);
@@ -140,9 +165,50 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
                                            List<Map<String, Object>> toolCalls,
                                            ResponseBodyEmitter emitter) throws Exception {
 
+        for (Map<String, Object> toolCall : toolCalls) {
+            String toolCallId = (String) toolCall.get("id");
+            String toolName = (String) toolCall.get("name");
+            String argsStr = (String) toolCall.get("args");
+
+            if (toolCallId == null || toolName == null) {
+                log.warn("工具调用信息不完整: {}", toolCall);
+                continue;
+            }
+
+            // 发送 tool_call executing 事件
+            sendToolCallEvent(emitter, toolCallId, toolName, "executing");
+
+            // 执行工具
+            String resultContent;
+            String status = "success";
+            try {
+                resultContent = executeTool(toolName, argsStr);
+                log.info("工具执行成功: name={}, result_length={}", toolName, resultContent.length());
+            } catch (Exception e) {
+                log.error("工具执行失败: name={}", toolName, e);
+                resultContent = "Error executing tool '" + toolName + "': " + e.getMessage();
+                status = "error";
+            }
+
+            // 截断过长结果
+            resultContent = truncateToolResponse(resultContent, 4000);
+
+            // 存储工具结果到上下文
+            Map<String, Object> toolResult = new HashMap<>();
+            toolResult.put("id", toolCallId);
+            toolResult.put("name", toolName);
+            toolResult.put("content", resultContent);
+            toolResult.put("status", status);
+            dynamicContext.getCurrentToolResults().add(toolResult);
+
+            // 追加 tool 消息到消息历史（供下一轮 AI 调用使用）
+            dynamicContext.appendToolMessage(toolCallId, resultContent);
+
+            // 发送 tool_result SSE 事件
+            sendToolResultEvent(emitter, toolCallId, resultContent, status);
+        }
+
     }
-
-
 
     // ═══════════════════════════════════════════════════════════════
     //  工具执行
