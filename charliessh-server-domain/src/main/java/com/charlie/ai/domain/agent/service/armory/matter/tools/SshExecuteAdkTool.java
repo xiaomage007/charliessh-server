@@ -1,7 +1,10 @@
 package com.charlie.ai.domain.agent.service.armory.matter.tools;
 
+import com.charlie.ai.domain.ssh.model.entity.DangerCheckResult;
 import com.charlie.ai.domain.ssh.model.entity.TerminalExecResult;
+import com.charlie.ai.domain.ssh.model.valobj.DangerRiskLevel;
 import com.charlie.ai.domain.ssh.service.ISshTerminalService;
+import com.charlie.ai.domain.ssh.service.security.DangerousCommandDetector;
 import com.google.adk.tools.Annotations;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +28,16 @@ public class SshExecuteAdkTool {
 
     @Resource
     private ISshTerminalService sshTerminalService;
+
+    /**
+     * 危险命令检测器
+     * <p>
+     * 模型生成的命令既可能幻觉出破坏性语法，也可能被目标机输出里的提示注入诱导，
+     * 因此必须在命令下发到远程主机之前做一道<b>服务端</b>强校验，
+     * 不能只依赖 prompt 里"危险命令会被拦截"的约定。
+     */
+    @Resource
+    private DangerousCommandDetector dangerousCommandDetector;
 
     /**
      * 单条命令执行超时（秒）
@@ -155,7 +168,8 @@ public class SshExecuteAdkTool {
     public static void setCurrentTerminalSession(String terminalSessionId) {
         currentTerminalSession.set(terminalSessionId);
         sessionTerminalSessionId = terminalSessionId;
-        log.info("[ThreadLocal] 设置终端会话: thread={}, terminalSession={}", Thread.currentThread().getName(), terminalSessionId);
+        log.info("[ThreadLocal] 设置终端会话: thread={}, terminalSession={}",
+                 Thread.currentThread().getName(), terminalSessionId);
     }
 
     /**
@@ -177,26 +191,71 @@ public class SshExecuteAdkTool {
         sessionTerminalSessionId = null;
     }
 
-    public Map<String, Object> executeCommand(@Annotations.Schema(name = "command", description = "要执行的 Shell 命令，如: ls -la, apt install docker.io, docker --version") String command) {
+    public Map<String, Object> executeCommand(
+            @Annotations.Schema(name = "command", description = "要执行的 Shell 命令，如: ls -la, apt install docker.io, docker --version") String command) {
         // 优先从 ThreadLocal 获取，支持异步线程继承
         String terminalSessionId = getCurrentSession();
 
         // ThreadLocal 为空时回退到会话级变量（线程池场景下 ThreadLocal 可能失效）
         if (terminalSessionId == null || terminalSessionId.isEmpty()) {
             terminalSessionId = sessionTerminalSessionId;
-            log.info("[executeCommand] ThreadLocal 为空，回退到会话级变量: terminalSessionId={}", terminalSessionId);
+            log.info("[executeCommand] ThreadLocal 为空，回退到会话级变量: terminalSessionId={}",
+                     terminalSessionId);
         }
 
-        log.info("[executeCommand] thread={}, terminalSessionId={}, command={}", Thread.currentThread().getName(), terminalSessionId, command);
+        log.info("[executeCommand] thread={}, terminalSessionId={}, command={}",
+                 Thread.currentThread().getName(), terminalSessionId, command);
 
         if (terminalSessionId == null || terminalSessionId.isEmpty()) {
             log.warn("[executeCommand] 终端会话ID为空，无法执行命令");
-            return Map.of("success", false, "output", "未绑定 SSH 终端会话。请先打开 SSH 终端连接。", "command", command);
+            return Map.of("success", false, "output", "未绑定 SSH 终端会话。请先打开 SSH 终端连接。",
+                          "command", command);
         }
 
+        // ============================================================================
+        // 危险命令检测：在命令真正下发到远程主机之前做服务端强校验
+        // ============================================================================
+        // 设计要点：
+        // 1) 必须放在 executeCommand 之前 —— 一旦命令进了 SSH 通道，再拦就晚了；
+        // 2) 拦截结果要结构化回传给模型（ruleId/reason/suggestion），
+        //    让模型知道"是被拦了"而不是"执行失败了"，避免它换个写法反复重试；
+        // 3) 拦截时严禁提示绕过手法，只把决定权交回用户。
+        DangerCheckResult dangerCheck = dangerousCommandDetector.detect(command);
+        if (dangerCheck.isBlocked()) {
+            log.warn("[executeCommand] 危险命令被拦截: session={}, level={}, rule={}, category={}, command={}",
+                     terminalSessionId, dangerCheck.getRiskLevel(), dangerCheck.getRuleId(),
+                     dangerCheck.getCategory(), command);
+
+            Map<String, Object> blockedResp = new HashMap<>();
+            blockedResp.put("success", false);
+            blockedResp.put("blocked", true);
+            blockedResp.put("command", command);
+            blockedResp.put("riskLevel", dangerCheck.getRiskLevel() != null
+                    ? dangerCheck.getRiskLevel().name() : null);
+            blockedResp.put("ruleId", dangerCheck.getRuleId());
+            blockedResp.put("category", dangerCheck.getCategory());
+            blockedResp.put("output", "命令已被安全策略拦截，未在目标服务器执行。风险等级: "
+                    + (dangerCheck.getRiskLevel() != null ? dangerCheck.getRiskLevel().getDesc() : "未知")
+                    + "；风险分类: " + dangerCheck.getCategory()
+                    + "；命中规则: " + dangerCheck.getRuleId()
+                    + "；原因: " + dangerCheck.getReason());
+            blockedResp.put("suggestion", dangerCheck.getSuggestion());
+            return blockedResp;
+        }
+
+        // 未被拦截但命中了风险规则：放行执行，同时把风险透传给模型，提示其向用户预警
+        boolean dangerWarned = dangerCheck.getRiskLevel() != null
+                && dangerCheck.getRiskLevel().getWeight() >= DangerRiskLevel.MEDIUM.getWeight();
+        if (dangerWarned) {
+            log.warn("[executeCommand] 危险命令告警放行: session={}, level={}, rule={}, command={}",
+                     terminalSessionId, dangerCheck.getRiskLevel(), dangerCheck.getRuleId(), command);
+        }
+
+        // 检查会话是否存在
         if (!sshTerminalService.sessionExists(terminalSessionId)) {
             log.warn("[executeCommand] 终端会话不存在: {}", terminalSessionId);
-            return Map.of("success", false, "output", "SSH 终端会话不存在或已关闭: " + terminalSessionId, "command", command);
+            return Map.of("success", false, "output",
+                          "SSH 终端会话不存在或已关闭: " + terminalSessionId, "command", command);
         }
 
         try {
@@ -209,7 +268,8 @@ public class SshExecuteAdkTool {
             String rawOutput = result.getOutput();
             String output = truncateOutput(rawOutput);
 
-            log.info("SSH 命令执行完成: exitCode={}, timeout={}, duration={}ms, outputLength={}, output={}",
+            log.info(
+                    "SSH 命令执行完成: exitCode={}, timeout={}, duration={}ms, outputLength={}, output={}",
                     result.getExitCode(), result.isTimeout(), result.getDurationMs(),
                     rawOutput.length(), output);
 
@@ -225,6 +285,11 @@ public class SshExecuteAdkTool {
             resp.put("success", success);
             resp.put("exitCode", result.getExitCode());
 
+            // 命中风险规则但被放行：把风险透传给模型，让其在汇报时向用户预警
+            if (dangerWarned) {
+                resp.put("warning", dangerCheck.getSuggestion());
+            }
+
             if (result.isTimeout()) {
                 resp.put("timeout", true);
                 resp.put("suggestion", "命令执行超过 " + execTimeoutSeconds + " 秒仍未结束，已被中断。"
@@ -238,7 +303,8 @@ public class SshExecuteAdkTool {
 
         } catch (Exception e) {
             log.error("SSH 命令执行异常: session={}, command={}", terminalSessionId, command, e);
-            return Map.of("success", false, "output", "命令执行异常: " + e.getMessage(), "command", command);
+            return Map.of("success", false, "output", "命令执行异常: " + e.getMessage(), "command",
+                          command);
         }
     }
 
@@ -528,99 +594,131 @@ public class SshExecuteAdkTool {
         }
 
         // 1. SSH 认证 / 免密
-        if (containsAny(normalized, "authentication failed", "auth failed", "invalid credentials", "bad credentials",
-                "no supported authentication methods", "host key verification failed", "too many authentication failures",
-                "permission denied (publickey", "root login refused", "认证失败", "身份验证失败", "身份验证错误")) {
+        if (containsAny(normalized, "authentication failed", "auth failed", "invalid credentials",
+                        "bad credentials",
+                        "no supported authentication methods", "host key verification failed",
+                        "too many authentication failures",
+                        "permission denied (publickey", "root login refused", "认证失败",
+                        "身份验证失败", "身份验证错误")) {
             return "SSH 认证失败。建议：①确认用户名与认证方式（密码/密钥）是否正确；②确认公钥已写入目标机 ~/.ssh/authorized_keys 且权限为 600；"
                     + "③host key verification failed 时先执行 ssh-keygen -R <目标IP> 清理旧指纹；④认证失败次数过多会被服务端临时封禁，需等待后再试。";
         }
 
         // 2. 命令不存在
         if (containsAny(normalized, "command not found", "command not recognised",
-                "is not recognized as an internal or external command", "unknown command", "not found in path",
-                "modulenotfounderror", "no module named", "未找到命令", "未知命令", "不是内部或外部命令")) {
+                        "is not recognized as an internal or external command", "unknown command",
+                        "not found in path",
+                        "modulenotfounderror", "no module named", "未找到命令", "未知命令",
+                        "不是内部或外部命令")) {
             return "命令不存在或不在 PATH 中。建议：①核对命令拼写；②确认软件包是否已安装（apt install / yum install / apk add）；"
                     + "③已安装则检查其 bin 目录是否在 PATH 中（echo $PATH）；④该命令在容器内可能需要改用绝对路径。";
         }
 
         // 3. 文件 / 目录不存在
-        if (containsAny(normalized, "no such file or directory", "no such file", "no such device", "no such host",
-                "no such user", "no such process", "no such container", "no such image", "cannot find", "could not find",
-                "couldn't find", "does not exist", "not exist", "找不到", "未找到", "不存在")) {
+        if (containsAny(normalized, "no such file or directory", "no such file", "no such device",
+                        "no such host",
+                        "no such user", "no such process", "no such container", "no such image",
+                        "cannot find", "could not find",
+                        "couldn't find", "does not exist", "not exist", "找不到", "未找到",
+                        "不存在")) {
             return "文件或目录不存在。建议：①用 ls / pwd 确认目标路径是否真实存在；②检查路径拼写与大小写（Linux 区分大小写）；"
                     + "③改用绝对路径；④注意相对路径是相对于当前工作目录，而非你以为的目录。";
         }
 
         // 4. 权限不足
-        if (containsAny(normalized, "permission denied", "access denied", "operation not permitted", "not permitted",
-                "not allowed", "you are not authorized", "unauthorized", "forbidden", "权限不足", "拒绝访问", "拒绝")) {
+        if (containsAny(normalized, "permission denied", "access denied", "operation not permitted",
+                        "not permitted",
+                        "not allowed", "you are not authorized", "unauthorized", "forbidden",
+                        "权限不足", "拒绝访问", "拒绝")) {
             return "权限不足。建议：①用 sudo 重新执行；②用 ls -l 检查目标文件/目录的 owner 与权限位；"
                     + "③确认当前用户是否在所需用户组中；④若报错来自容器内，注意容器内 root 与宿主机 root 并非同一用户。";
         }
 
         // 5. 参数 / 用法错误
-        if (containsAny(normalized, "invalid argument", "invalid option", "invalid parameter", "invalid syntax",
-                "illegal option", "unrecognized option", "unrecognized argument", "unrecognized flag", "unknown option",
-                "unknown argument", "unknown flag", "unexpected argument", "bad flag", "too many arguments",
-                "missing argument", "missing required", "required argument", "required parameter", "usage:", "try '",
-                "参数错误", "未知参数", "无效参数", "用法:")) {
+        if (containsAny(normalized, "invalid argument", "invalid option", "invalid parameter",
+                        "invalid syntax",
+                        "illegal option", "unrecognized option", "unrecognized argument",
+                        "unrecognized flag", "unknown option",
+                        "unknown argument", "unknown flag", "unexpected argument", "bad flag",
+                        "too many arguments",
+                        "missing argument", "missing required", "required argument",
+                        "required parameter", "usage:", "try '",
+                        "参数错误", "未知参数", "无效参数", "用法:")) {
             return "命令参数或用法不正确。建议：①执行该命令的 --help / -h 查看正确用法；②检查参数顺序、取值范围与取值格式；"
                     + "③确认当前版本是否支持该参数（command --version）。";
         }
 
         // 6. 语法 / 解析错误
-        if (containsAny(normalized, "syntax error", "parse error", "parsing error", "unexpected token", "unexpected eof",
-                "invalid syntax", "语法错误")) {
+        if (containsAny(normalized, "syntax error", "parse error", "parsing error",
+                        "unexpected token", "unexpected eof",
+                        "invalid syntax", "语法错误")) {
             return "命令语法错误或脚本解析失败。建议：①检查引号是否成对、管道符 | 与重定向 > 是否正确；"
                     + "②复杂命令先拆成多步执行；③脚本类报错按提示的行号定位；④含变量的命令注意是否需要转义。";
         }
 
         // 7. 网络 / 连接
-        if (containsAny(normalized, "connection refused", "connection reset", "connection timed out", "connection closed",
-                "connection aborted", "lost connection", "broken pipe", "no route to host", "network is unreachable",
-                "network is down", "host is unreachable", "host is down", "name or service not known",
-                "temporary failure in name resolution", "could not resolve host", "nodename nor servname provided",
-                "timed out", "timeout exceeded", "connection timeout", "proxyconnect", "ssl connection error",
-                "连接失败", "连接被拒绝", "连接超时", "无法连接", "网络不可达", "解析失败")) {
+        if (containsAny(normalized, "connection refused", "connection reset",
+                        "connection timed out", "connection closed",
+                        "connection aborted", "lost connection", "broken pipe", "no route to host",
+                        "network is unreachable",
+                        "network is down", "host is unreachable", "host is down",
+                        "name or service not known",
+                        "temporary failure in name resolution", "could not resolve host",
+                        "nodename nor servname provided",
+                        "timed out", "timeout exceeded", "connection timeout", "proxyconnect",
+                        "ssl connection error",
+                        "连接失败", "连接被拒绝", "连接超时", "无法连接", "网络不可达",
+                        "解析失败")) {
             return "网络连接失败。建议：①确认目标服务是否已启动（systemctl status <服务> / ps -ef | grep <进程>）；"
                     + "②确认端口是否在监听（ss -lntp）；③检查防火墙与安全组规则；④确认目标 IP/域名可达（ping / nc -zv host port）；"
                     + "⑤DNS 异常时检查 /etc/resolv.conf。";
         }
 
         // 8. 资源 / 磁盘 / 占用
-        if (containsAny(normalized, "no space left on device", "disk quota exceeded", "out of memory", "out of disk space",
-                "cannot allocate memory", "too many open files", "too many connections", "resource busy",
-                "device or resource busy", "text file busy", "read-only file system", "readonly file system",
-                "address already in use", "file exists", "空间不足", "磁盘空间", "内存不足", "已存在", "只读")) {
+        if (containsAny(normalized, "no space left on device", "disk quota exceeded",
+                        "out of memory", "out of disk space",
+                        "cannot allocate memory", "too many open files", "too many connections",
+                        "resource busy",
+                        "device or resource busy", "text file busy", "read-only file system",
+                        "readonly file system",
+                        "address already in use", "file exists", "空间不足", "磁盘空间", "内存不足",
+                        "已存在", "只读")) {
             return "系统资源不足或目标被占用。建议：①df -h / du -sh 定位磁盘占用并清理；②free -h 查看内存；"
                     + "③确认端口/文件未被其他进程占用（lsof -i :端口）；④只读文件系统需检查挂载参数或重新挂载。";
         }
 
         // 9. 进程异常退出 / 崩溃
-        if (containsAny(normalized, "segmentation fault", "core dumped", "aborted", "killed", "terminated",
-                "non-zero exit", "nonzero exit", "returned non-zero", "exception in thread", "java.lang.", "caused by:",
-                "被杀死", "进程退出")) {
+        if (containsAny(normalized, "segmentation fault", "core dumped", "aborted", "killed",
+                        "terminated",
+                        "non-zero exit", "nonzero exit", "returned non-zero", "exception in thread",
+                        "java.lang.", "caused by:",
+                        "被杀死", "进程退出")) {
             return "进程异常退出或被系统终止。建议：①执行 echo $? 查看退出码；②用 dmesg / journalctl 确认是否被 OOM Killer 杀掉；"
                     + "③core dumped 可用 gdb 定位崩溃点；④确认是否被人工中断（Ctrl+C）。";
         }
 
         // 10. 容器 / Docker
-        if (containsAny(normalized, "cannot connect to the docker daemon", "docker:", "no such container", "no such image",
-                "image not found", "pull access denied", "manifest unknown", "is not running", "container not found")) {
+        if (containsAny(normalized, "cannot connect to the docker daemon", "docker:",
+                        "no such container", "no such image",
+                        "image not found", "pull access denied", "manifest unknown",
+                        "is not running", "container not found")) {
             return "容器 / 镜像相关错误。建议：①systemctl status docker 确认 dockerd 已运行；②docker images 确认本地镜像存在；"
                     + "③私有仓库需先 docker login；④镜像名与标签是否写错；⑤容器未启动时用 docker ps -a 查看状态与退出码。";
         }
 
         // 11. 服务 / systemd
-        if (containsAny(normalized, "unit not found", "job for", "failed to start", "failed to load", "no such unit")) {
+        if (containsAny(normalized, "unit not found", "job for", "failed to start",
+                        "failed to load", "no such unit")) {
             return "系统服务操作失败。建议：①systemctl list-unit-files | grep <名称> 确认服务名是否正确（注意 .service 后缀）；"
                     + "②systemctl status <服务> 查看详细状态；③查看 journalctl -u <服务> -n 50 获取真实失败原因。";
         }
 
         // 12. 通用失败
-        if (containsAny(normalized, "failed", "failure", "fatal:", "panic:", "severe:", "critical:", "error:",
-                "unable to", "could not", "couldn't", "cannot ", "can't ", "not implemented", "unsupported",
-                "失败", "错误", "异常")) {
+        if (containsAny(normalized, "failed", "failure", "fatal:", "panic:", "severe:", "critical:",
+                        "error:",
+                        "unable to", "could not", "couldn't", "cannot ", "can't ",
+                        "not implemented", "unsupported",
+                        "失败", "错误", "异常")) {
             return "命令执行失败。建议：①优先看输出最后几行，那通常才是真正的失败原因；②确认依赖的服务/进程是否已启动；"
                     + "③用更详细的日志复现（journalctl -u <服务> -n 50 / docker logs <容器>）；④必要时先执行 --help 确认用法。";
         }
@@ -666,7 +764,8 @@ public class SshExecuteAdkTool {
                 return -1;
             }
             int end = idx + command.length();
-            boolean lineEnd = end >= text.length() || text.charAt(end) == '\r' || text.charAt(end) == '\n';
+            boolean lineEnd = end >= text.length() || text.charAt(end) == '\r' || text.charAt(
+                    end) == '\n';
             if (lineEnd) {
                 return idx;
             }
