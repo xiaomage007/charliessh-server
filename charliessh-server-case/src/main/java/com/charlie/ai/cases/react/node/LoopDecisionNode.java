@@ -100,7 +100,8 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
 
     @Override
     public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(
-            ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+            ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
 
         String stopReason = dynamicContext.getStopReason();
         // 有终止原因 → 路由到 UserFeedbackNode
@@ -118,6 +119,7 @@ public class LoopDecisionNode extends AbstractAIAgentReActSupport {
                     dynamicContext.getResult().setMaxStepsReached(true);
                     break;
                 case "max_tool_calls":
+                    break;
                 case "completed":
                 case "finish":
                 default:

@@ -47,19 +47,29 @@ public class DefaultReActFactory {
         //  会话基本信息
         // ══════════════════════════════════════════════════════════
 
-        /** 对话会话 ID */
+        /**
+         * 对话会话 ID
+         */
         private String sessionId;
 
-        /** 用户 ID */
+        /**
+         * 用户 ID
+         */
         private String userId;
 
-        /** 智能体 ID */
+        /**
+         * 智能体 ID
+         */
         private String agentId;
 
-        /** SSH 终端会话 ID */
+        /**
+         * SSH 终端会话 ID
+         */
         private String terminalSessionId;
 
-        /** SSE 事件发射器 */
+        /**
+         * SSE 事件发射器
+         */
         private ResponseBodyEmitter emitter;
         // ══════════════════════════════════════════════════════════
         //  消息历史
@@ -89,24 +99,36 @@ public class DefaultReActFactory {
         //  ReAct 循环状态
         // ══════════════════════════════════════════════════════════
 
-        /** 当前步数 */
+        /**
+         * 当前步数
+         */
         @Builder.Default
         private AtomicInteger currentStep = new AtomicInteger(0);
 
-        /** 最大步数 */
+        /**
+         * 最大步数
+         */
         private int maxSteps;
 
-        /** 最大工具调用次数（总计） */
+        /**
+         * 最大工具调用次数（总计）
+         */
         private int maxToolCalls;
 
-        /** 每轮最大工具调用次数 */
+        /**
+         * 每轮最大工具调用次数
+         */
         private int maxToolCallsPerRound;
 
-        /** 总工具调用次数 */
+        /**
+         * 总工具调用次数
+         */
         @Builder.Default
         private AtomicInteger totalToolCallCount = new AtomicInteger(0);
 
-        /** 当前轮工具调用次数 */
+        /**
+         * 当前轮工具调用次数
+         */
         @Builder.Default
         private AtomicInteger roundToolCallCount = new AtomicInteger(0);
 
@@ -114,33 +136,65 @@ public class DefaultReActFactory {
         //  AI 响应缓冲（用于累积流式文本）
         // ══════════════════════════════════════════════════════════
 
-        /** 累积的文本响应 */
+        /**
+         * 累积的文本响应
+         */
         @Builder.Default
         private StringBuilder assistantContent = new StringBuilder();
 
-        /** 累积的 reasoning_content */
+        /**
+         * 累积的 reasoning_content
+         */
         @Builder.Default
         private StringBuilder assistantReasoning = new StringBuilder();
 
-        /** 上一轮次收到的 reasoning_content（需要回传给 API） */
+        /**
+         * 上一轮次收到的 reasoning_content（需要回传给 API）
+         */
         private String lastReasoningContent;
 
         // ══════════════════════════════════════════════════════════
         //  中断状态
         // ══════════════════════════════════════════════════════════
 
-        /** 中断原因：user_stop / idle_timeout / max_steps */
+        /**
+         * 中断原因：user_stop / idle_timeout / max_steps
+         */
         private String stopReason;
 
-        /** 错误消息（如有） */
+        /**
+         * 错误消息（如有）
+         */
         private String errorMessage;
 
         // ══════════════════════════════════════════════════════════
         //  结果对象（供 UserFeedbackNode 使用）
         // ══════════════════════════════════════════════════════════
 
-        /** 最终结果 DTO */
+        /**
+         * 最终结果 DTO
+         */
         private ReActResultDTO result;
+
+        /**
+         * 工具回调列表（从 ArmoryService 装配链路获取）
+         */
+        private org.springframework.ai.tool.ToolCallback[] toolCallbacks;
+
+        /**
+         * 是否使用 Anthropic 格式（tool_call_id vs tool_use_id）
+         */
+        private boolean useAnthropicFormat;
+
+        // ══════════════════════════════════════════════════════════
+        //  上下文记忆（Phase 1: 动态 Prompt 构建）
+        // ══════════════════════════════════════════════════════════
+
+        /**
+         * 最近执行的命令记录（用于注入到动态 Prompt 中）
+         */
+        @Builder.Default
+        private List<String> recentCommands = new ArrayList<>();
 
         // ══════════════════════════════════════════════════════════
         //  辅助方法
@@ -186,8 +240,17 @@ public class DefaultReActFactory {
         }
 
         public void appendToolMessage(String toolCallId, String content) {
-            Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content", content);
+            Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content",
+                                             content);
             messageHistory.add(msg);
+        }
+
+        public void addRecentCommand(String command) {
+            if (command == null || command.trim().isEmpty()) return;
+            recentCommands.add(command.trim());
+            while (recentCommands.size() > 20) {
+                recentCommands.remove(0);
+            }
         }
 
     }

@@ -89,7 +89,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
     @Override
     public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(
-            ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+            ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
 
         List<Map<String, Object>> toolCalls = dynamicContext.getCurrentToolCalls();
 
@@ -148,6 +149,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         }
 
         // 清除本轮工具调用标记，避免重复路由
+        // 注意：toolResults 保留，供 UserFeedbackNode 构建最终结果
         dynamicContext.getCurrentToolCalls().clear();
 
     }
@@ -183,7 +185,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
             String status = "success";
             try {
                 resultContent = executeTool(toolName, argsStr);
-                log.info("工具执行成功: name={}, result_length={}", toolName, resultContent.length());
+                log.info("工具执行成功: name={}, result_length={}", toolName,
+                         resultContent.length());
             } catch (Exception e) {
                 log.error("工具执行失败: name={}", toolName, e);
                 resultContent = "Error executing tool '" + toolName + "': " + e.getMessage();
@@ -290,8 +293,10 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         try {
             Map<String, Object> args = objectMapper.readValue(argsStr,
                                                               objectMapper.getTypeFactory()
-                                                                          .constructMapType(Map.class, String.class,
-                                                                                            Object.class));
+                                                                          .constructMapType(
+                                                                                  Map.class,
+                                                                                  String.class,
+                                                                                  Object.class));
             Object value = args.get(key);
             return value != null ? value.toString() : null;
         } catch (Exception e) {
@@ -321,7 +326,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
     private String truncateToolResponse(String content, int maxLength) {
         if (content == null) return "";
         if (content.length() <= maxLength) return content;
-        return content.substring(0, maxLength) + "\n... (truncated, total " + content.length() + " chars)";
+        return content.substring(0,
+                                 maxLength) + "\n... (truncated, total " + content.length() + " chars)";
     }
 
 }
