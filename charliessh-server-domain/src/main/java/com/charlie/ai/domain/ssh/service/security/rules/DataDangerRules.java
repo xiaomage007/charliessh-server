@@ -1,5 +1,6 @@
 package com.charlie.ai.domain.ssh.service.security.rules;
 
+import com.charlie.ai.domain.ssh.model.entity.ParsedCommand;
 import com.charlie.ai.domain.ssh.service.security.rule.CommandRule;
 import com.charlie.ai.domain.ssh.service.security.rule.DangerRule;
 
@@ -93,7 +94,7 @@ public final class DataDangerRules {
                 cmd -> cmd.is("dropdb") || lower(cmd).contains("db.dropdatabase"));
     }
 
-    private static String lower(com.charlie.ai.domain.ssh.service.security.model.ParsedCommand cmd) {
+    private static String lower(ParsedCommand cmd) {
         return cmd.getRaw().toLowerCase(Locale.ROOT);
     }
 

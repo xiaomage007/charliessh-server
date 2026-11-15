@@ -1,4 +1,4 @@
-package com.charlie.ai.domain.ssh.service.security.model;
+package com.charlie.ai.domain.ssh.model.entity;
 
 import java.util.List;
 

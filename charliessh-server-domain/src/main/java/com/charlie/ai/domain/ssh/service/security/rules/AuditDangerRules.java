@@ -1,6 +1,6 @@
 package com.charlie.ai.domain.ssh.service.security.rules;
 
-import com.charlie.ai.domain.ssh.service.security.model.ParsedCommand;
+import com.charlie.ai.domain.ssh.model.entity.ParsedCommand;
 import com.charlie.ai.domain.ssh.service.security.policy.SensitivePathPolicy;
 import com.charlie.ai.domain.ssh.service.security.rule.CommandRule;
 import com.charlie.ai.domain.ssh.service.security.rule.DangerRule;

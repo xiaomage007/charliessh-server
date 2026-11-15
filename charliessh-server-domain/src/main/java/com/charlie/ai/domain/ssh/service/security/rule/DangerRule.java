@@ -1,7 +1,7 @@
 package com.charlie.ai.domain.ssh.service.security.rule;
 
 import com.charlie.ai.domain.ssh.model.valobj.DangerRiskLevel;
-import com.charlie.ai.domain.ssh.service.security.model.ParsedCommand;
+import com.charlie.ai.domain.ssh.model.entity.ParsedCommand;
 
 import java.util.function.Function;
 

@@ -2,8 +2,8 @@ package com.charlie.ai.domain.ssh.service.security;
 
 import com.charlie.ai.domain.ssh.model.entity.DangerCheckResult;
 import com.charlie.ai.domain.ssh.model.valobj.DangerRiskLevel;
-import com.charlie.ai.domain.ssh.service.security.model.ParsedCommand;
-import com.charlie.ai.domain.ssh.service.security.model.ParsedScript;
+import com.charlie.ai.domain.ssh.model.entity.ParsedCommand;
+import com.charlie.ai.domain.ssh.model.entity.ParsedScript;
 import com.charlie.ai.domain.ssh.service.security.parser.ShellCommandParser;
 import com.charlie.ai.domain.ssh.service.security.rule.CommandRule;
 import com.charlie.ai.domain.ssh.service.security.rule.TextRule;

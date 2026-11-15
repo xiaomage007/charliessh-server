@@ -1,7 +1,7 @@
 package com.charlie.ai.domain.ssh.service.security.parser;
 
-import com.charlie.ai.domain.ssh.service.security.model.ParsedCommand;
-import com.charlie.ai.domain.ssh.service.security.model.ParsedScript;
+import com.charlie.ai.domain.ssh.model.entity.ParsedCommand;
+import com.charlie.ai.domain.ssh.model.entity.ParsedScript;
 
 import java.util.ArrayList;
 import java.util.Arrays;
