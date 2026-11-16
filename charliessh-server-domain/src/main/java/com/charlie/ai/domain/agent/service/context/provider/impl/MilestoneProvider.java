@@ -1,9 +1,13 @@
 package com.charlie.ai.domain.agent.service.context.provider.impl;
 
+import com.charlie.ai.domain.agent.model.valobj.prompt.MilestoneVO;
 import com.charlie.ai.domain.agent.service.context.provider.IContextProvider;
+import com.charlie.ai.domain.agent.service.promote.dynamic.MilestoneTracker;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
+import javax.annotation.Resource;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -44,6 +48,9 @@ import java.util.Map;
 @Component
 public class MilestoneProvider implements IContextProvider {
 
+    @Resource
+    private MilestoneTracker milestoneTracker;
+
     @Override
     public String getName() {
         return "milestoneVO";
@@ -57,6 +64,10 @@ public class MilestoneProvider implements IContextProvider {
     @Override
     public Map<String, Object> provide(String sessionId, String userId, String terminalSessionId,
                                        List<Map<String, Object>> messageHistory) {
-        return Map.of();
+        Map<String, Object> result = new HashMap<>();
+        List<MilestoneVO> milestoneVOS = milestoneTracker.getRecent(sessionId, 10);
+        result.put("milestoneVOS", milestoneVOS);
+        return result;
     }
+
 }
