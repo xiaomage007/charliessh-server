@@ -112,8 +112,9 @@ public class ToolResultProvider implements IContextProvider {
 
     @Data
     @AllArgsConstructor
-    public static class ToolResultEntry {
+    private static class ToolResultEntry {
         private String toolName;
         private String result;
     }
+
 }
