@@ -5,12 +5,14 @@ import com.charlie.ai.api.dto.ChatRequestDTO;
 import com.charlie.ai.api.dto.ReActResultDTO;
 import com.charlie.ai.cases.react.AbstractAIAgentReActSupport;
 import com.charlie.ai.cases.react.factory.DefaultReActFactory;
+import com.charlie.ai.domain.agent.service.IChatContextService;
+import com.charlie.ai.domain.agent.service.IPromptService;
 import com.charlie.ai.domain.agent.service.armory.matter.tools.SshExecuteAdkTool;
-import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
+import javax.annotation.Resource;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,9 +55,15 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
     @Resource
     private SshExecuteAdkTool sshExecuteAdkTool;
 
+    @Resource
+    private IPromptService promptService;
+
+    @Resource
+    private IChatContextService chatContextService;
+
     @Override
     protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
-                                     DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
         List<Map<String, Object>> toolCalls = dynamicContext.getCurrentToolCalls();
         List<Map<String, Object>> toolResults = dynamicContext.getCurrentToolResults();
 
@@ -65,7 +73,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         }
 
         log.info("ReAct ToolCallNode - 处理 {} 个工具调用，已有 {} 个结果",
-                 toolCalls.size(), toolResults != null ? toolResults.size() : 0);
+                toolCalls.size(), toolResults != null ? toolResults.size() : 0);
 
         ResponseBodyEmitter emitter = dynamicContext.getEmitter();
 
@@ -121,8 +129,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
      * <p>ADK runner.runAsync() 内部已执行工具，FunctionResponse 已在事件流中返回
      */
     private void handleAdkToolResults(DefaultReActFactory.DynamicContext dynamicContext,
-                                      List<Map<String, Object>> toolCalls,
-                                      List<Map<String, Object>> toolResults) {
+            List<Map<String, Object>> toolCalls,
+            List<Map<String, Object>> toolResults) {
 
         // ADK runner 内部已管理对话历史（自动执行工具 + 追加 FunctionResponse）
         // 这里只做日志记录，不重复追加消息到 history
@@ -142,7 +150,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
             if (matchedResult != null) {
                 String content = (String) matchedResult.get("content");
                 log.info("ADK 工具结果: id={}, name={}, result_length={}",
-                         toolCallId, toolName, content != null ? content.length() : 0);
+                        toolCallId, toolName, content != null ? content.length() : 0);
             } else {
                 log.warn("未找到工具结果: id={}, name={}", toolCallId, toolName);
             }
@@ -150,7 +158,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
         // 清除本轮工具调用标记，避免重复路由
         // 注意：toolResults 保留，供 UserFeedbackNode 构建最终结果
-        dynamicContext.getCurrentToolCalls().clear();
+        dynamicContext.getCurrentToolCalls()
+                      .clear();
 
     }
 
@@ -164,8 +173,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
      * <p>当 ADK 未自动执行工具时，由 ToolCallNode 直接执行
      */
     private void handleManualToolExecution(DefaultReActFactory.DynamicContext dynamicContext,
-                                           List<Map<String, Object>> toolCalls,
-                                           ResponseBodyEmitter emitter) throws Exception {
+            List<Map<String, Object>> toolCalls,
+            ResponseBodyEmitter emitter) throws Exception {
 
         for (Map<String, Object> toolCall : toolCalls) {
             String toolCallId = (String) toolCall.get("id");
@@ -186,7 +195,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
             try {
                 resultContent = executeTool(toolName, argsStr);
                 log.info("工具执行成功: name={}, result_length={}", toolName,
-                         resultContent.length());
+                        resultContent.length());
             } catch (Exception e) {
                 log.error("工具执行失败: name={}", toolName, e);
                 resultContent = "Error executing tool '" + toolName + "': " + e.getMessage();
@@ -202,10 +211,17 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
             toolResult.put("name", toolName);
             toolResult.put("content", resultContent);
             toolResult.put("status", status);
-            dynamicContext.getCurrentToolResults().add(toolResult);
+            dynamicContext.getCurrentToolResults()
+                          .add(toolResult);
 
             // 追加 tool 消息到消息历史（供下一轮 AI 调用使用）
             dynamicContext.appendToolMessage(toolCallId, resultContent);
+
+            // 记录里程碑和工具执行摘要（供下一轮 Prompt 注入）
+            promptService.detectAndRecordMilestone(dynamicContext.getSessionId(), "tool",
+                    resultContent);
+            chatContextService.pushToolResult(dynamicContext.getSessionId(), toolName,
+                    resultContent);
 
             // 发送 tool_result SSE 事件
             sendToolResultEvent(emitter, toolCallId, resultContent, status);
@@ -261,20 +277,25 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         StringBuilder sb = new StringBuilder();
 
         Object output = result.get("output");
-        if (output != null && !output.toString().isEmpty()) {
+        if (output != null && !output.toString()
+                                     .isEmpty()) {
             sb.append(output);
         }
 
         Object error = result.get("error");
-        if (error != null && !error.toString().isEmpty()) {
+        if (error != null && !error.toString()
+                                   .isEmpty()) {
             if (!sb.isEmpty()) sb.append("\n");
-            sb.append("[ERROR] ").append(error);
+            sb.append("[ERROR] ")
+              .append(error);
         }
 
         Object exitCode = result.get("exitCode");
         if (exitCode != null) {
             if (!sb.isEmpty()) sb.append("\n");
-            sb.append("[Exit code: ").append(exitCode).append("]");
+            sb.append("[Exit code: ")
+              .append(exitCode)
+              .append("]");
         }
 
         return !sb.isEmpty() ? sb.toString() : "Command executed with no output";
@@ -292,11 +313,11 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
 
         try {
             Map<String, Object> args = objectMapper.readValue(argsStr,
-                                                              objectMapper.getTypeFactory()
-                                                                          .constructMapType(
-                                                                                  Map.class,
-                                                                                  String.class,
-                                                                                  Object.class));
+                    objectMapper.getTypeFactory()
+                                .constructMapType(
+                                        Map.class,
+                                        String.class,
+                                        Object.class));
             Object value = args.get(key);
             return value != null ? value.toString() : null;
         } catch (Exception e) {
@@ -307,7 +328,8 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
             if (idx >= 0) {
                 int colonIdx = argsStr.indexOf(":", idx + pattern.length());
                 if (colonIdx >= 0) {
-                    String remaining = argsStr.substring(colonIdx + 1).trim();
+                    String remaining = argsStr.substring(colonIdx + 1)
+                                              .trim();
                     if (remaining.startsWith("\"")) {
                         int endQuote = remaining.indexOf("\"", 1);
                         if (endQuote > 0) {
@@ -327,7 +349,7 @@ public class ToolCallNode extends AbstractAIAgentReActSupport {
         if (content == null) return "";
         if (content.length() <= maxLength) return content;
         return content.substring(0,
-                                 maxLength) + "\n... (truncated, total " + content.length() + " chars)";
+                maxLength) + "\n... (truncated, total " + content.length() + " chars)";
     }
 
 }
