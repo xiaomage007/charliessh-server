@@ -3,8 +3,8 @@ package com.charlie.ai.domain.agent.service.context.reducer.impl;
 import com.charlie.ai.domain.agent.service.context.reducer.IMessageReducer;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
-import java.util.Map;
+import javax.annotation.Resource;
+import java.util.*;
 
 /**
  * 混合裁剪器（ChatContextService 实际使用的裁剪策略）
@@ -39,10 +39,43 @@ import java.util.Map;
 @Component
 public class HybridReducer implements IMessageReducer {
 
+    @Resource
+    private PriorityReducer priorityReducer;
+
+    @Resource
+    private SlidingWindowReducer slidingWindowReducer;
+
 
     @Override
     public List<Map<String, Object>> reduce(List<Map<String, Object>> messages, int tokenBudget) {
-        return List.of();
+        Set<Integer> priorityKeep = indexSet(priorityReducer.reduce(messages, tokenBudget),
+                messages);
+        Set<Integer> slidingKeep = indexSet(slidingWindowReducer.reduce(messages, tokenBudget),
+                messages);
+
+        // 取交集
+        Set<Integer> keepIndices = new HashSet<>(priorityKeep);
+        keepIndices.retainAll(slidingKeep);
+
+        // 保证至少有最近 2 条
+        int minKeep = Math.min(2, messages.size());
+        for (int i = messages.size() - minKeep; i < messages.size(); i++) {
+            keepIndices.add(i);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < messages.size(); i++) {
+            if (keepIndices.contains(i)) result.add(messages.get(i));
+        }
+        return result;
+    }
+
+    private Set<Integer> indexSet(List<Map<String, Object>> subset, List<Map<String, Object>> all) {
+        Set<Integer> indices = new HashSet<>();
+        for (Map<String, Object> msg : subset) {
+            int idx = all.indexOf(msg);
+            if (idx >= 0) indices.add(idx);
+        }
+        return indices;
     }
 
 }
