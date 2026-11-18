@@ -57,7 +57,7 @@ public class MilestoneProvider implements IContextProvider {
     }
 
     @Override
-    public boolean enable() {
+    public boolean enabled() {
         return true;
     }
 

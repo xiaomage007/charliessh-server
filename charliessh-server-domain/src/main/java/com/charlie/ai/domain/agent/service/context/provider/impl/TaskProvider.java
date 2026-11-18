@@ -51,7 +51,7 @@ public class TaskProvider implements IContextProvider {
     }
 
     @Override
-    public boolean enable() {
+    public boolean enabled() {
         return true;
     }
 
