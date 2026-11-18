@@ -44,8 +44,8 @@ public class DynamicPromptBuilder {
 
         String result = sb.toString();
         log.debug("动态 Prompt 构建完成，长度: {} (基础: {}, 动态: {})",
-                  result.length(), baseInstruction.length(),
-                  result.length() - baseInstruction.length());
+                result.length(), baseInstruction.length(),
+                result.length() - baseInstruction.length());
         return result;
     }
 
@@ -70,29 +70,59 @@ public class DynamicPromptBuilder {
                 || !isEmpty(ctx.getCurrentUser()) || !isEmpty(ctx.getCurrentDirectory())) {
             sb.append("[系统环境]\n");
             if (!isEmpty(ctx.getServerInfo()))
-                sb.append("服务器: ").append(ctx.getServerInfo()).append("\n");
-            if (!isEmpty(ctx.getOsInfo())) sb.append("系统: ").append(ctx.getOsInfo()).append("\n");
+                sb.append("服务器: ")
+                  .append(ctx.getServerInfo())
+                  .append("\n");
+            if (!isEmpty(ctx.getOsInfo())) sb.append("系统: ")
+                                             .append(ctx.getOsInfo())
+                                             .append("\n");
             if (!isEmpty(ctx.getCurrentUser()))
-                sb.append("用户: ").append(ctx.getCurrentUser()).append("\n");
+                sb.append("用户: ")
+                  .append(ctx.getCurrentUser())
+                  .append("\n");
             if (!isEmpty(ctx.getCurrentDirectory()))
-                sb.append("目录: ").append(ctx.getCurrentDirectory()).append("\n");
+                sb.append("目录: ")
+                  .append(ctx.getCurrentDirectory())
+                  .append("\n");
             hasContent = true;
         }
 
-        if (ctx.getRecentCommands() != null && !ctx.getRecentCommands().isEmpty()) {
+        if (ctx.getRecentCommands() != null && !ctx.getRecentCommands()
+                                                   .isEmpty()) {
             sb.append("\n[最近执行的命令]\n");
             for (String cmd : ctx.getRecentCommands()) {
-                sb.append("- ").append(cmd).append("\n");
+                sb.append("- ")
+                  .append(cmd)
+                  .append("\n");
             }
             hasContent = true;
         }
 
-        if (ctx.getMilestoneVOS() != null && !ctx.getMilestoneVOS().isEmpty()) {
+        if (ctx.getMilestoneVOS() != null && !ctx.getMilestoneVOS()
+                                                 .isEmpty()) {
             sb.append("\n[关键事件]\n");
             for (MilestoneVO m : ctx.getMilestoneVOS()) {
-                sb.append("- [").append(m.getType().name()).append("] ").append(m.getContent())
+                sb.append("- [")
+                  .append(m.getType()
+                           .name())
+                  .append("] ")
+                  .append(m.getContent())
                   .append("\n");
             }
+            hasContent = true;
+        }
+
+        if (!isEmpty(ctx.getToolResultSummary())) {
+            sb.append("\n[工具执行摘要]\n")
+              .append(ctx.getToolResultSummary())
+              .append("\n");
+            hasContent = true;
+        }
+
+        if (!isEmpty(ctx.getTaskDescription())) {
+            sb.append("\n[当前任务]\n")
+              .append(ctx.getTaskDescription())
+              .append("\n");
             hasContent = true;
         }
 
@@ -118,13 +148,21 @@ public class DynamicPromptBuilder {
         }
         sb.append("\n\n## 当前环境信息\n");
         if (!isEmpty(ctx.getServerInfo()))
-            sb.append("- 服务器: ").append(ctx.getServerInfo()).append("\n");
+            sb.append("- 服务器: ")
+              .append(ctx.getServerInfo())
+              .append("\n");
         if (!isEmpty(ctx.getOsInfo()))
-            sb.append("- 操作系统: ").append(ctx.getOsInfo()).append("\n");
+            sb.append("- 操作系统: ")
+              .append(ctx.getOsInfo())
+              .append("\n");
         if (!isEmpty(ctx.getCurrentUser()))
-            sb.append("- 当前用户: ").append(ctx.getCurrentUser()).append("\n");
+            sb.append("- 当前用户: ")
+              .append(ctx.getCurrentUser())
+              .append("\n");
         if (!isEmpty(ctx.getCurrentDirectory()))
-            sb.append("- 工作目录: ").append(ctx.getCurrentDirectory()).append("\n");
+            sb.append("- 工作目录: ")
+              .append(ctx.getCurrentDirectory())
+              .append("\n");
     }
 
     /**
@@ -136,10 +174,13 @@ public class DynamicPromptBuilder {
      * @param ctx 动态上下文
      */
     private void appendRecentCommands(StringBuilder sb, PromptContextVO ctx) {
-        if (ctx.getRecentCommands() == null || ctx.getRecentCommands().isEmpty()) return;
+        if (ctx.getRecentCommands() == null || ctx.getRecentCommands()
+                                                  .isEmpty()) return;
         sb.append("\n## 最近操作记录\n");
         for (String cmd : ctx.getRecentCommands()) {
-            sb.append("- ").append(cmd).append("\n");
+            sb.append("- ")
+              .append(cmd)
+              .append("\n");
         }
     }
 
@@ -151,10 +192,15 @@ public class DynamicPromptBuilder {
      * @param ctx 动态上下文
      */
     private void appendMilestones(StringBuilder sb, PromptContextVO ctx) {
-        if (ctx.getMilestoneVOS() == null || ctx.getMilestoneVOS().isEmpty()) return;
+        if (ctx.getMilestoneVOS() == null || ctx.getMilestoneVOS()
+                                                .isEmpty()) return;
         sb.append("\n## 关键事件\n");
         for (MilestoneVO m : ctx.getMilestoneVOS()) {
-            sb.append("- [").append(m.getType().name()).append("] ").append(m.getContent())
+            sb.append("- [")
+              .append(m.getType()
+                       .name())
+              .append("] ")
+              .append(m.getContent())
               .append("\n");
         }
     }
@@ -166,7 +212,8 @@ public class DynamicPromptBuilder {
      * @return true 表示为 null 或全空白
      */
     private boolean isEmpty(String s) {
-        return s == null || s.trim().isEmpty();
+        return s == null || s.trim()
+                             .isEmpty();
     }
 
 }
