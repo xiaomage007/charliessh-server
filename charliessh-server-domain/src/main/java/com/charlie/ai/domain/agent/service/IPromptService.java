@@ -1,6 +1,7 @@
 package com.charlie.ai.domain.agent.service;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * @Description: 提示词领域服务接口
@@ -35,10 +36,11 @@ public interface IPromptService {
      * @param sessionId         对话会话 ID
      * @param terminalSessionId SSH 终端会话 ID（可为 null）
      * @param recentCommands    最近执行的命令列表
+     * @param messageHistory    对话历史记录
      * @return 注入了动态上下文的用户消息
      */
     String buildEnrichedMessage(String userMessage, String sessionId, String terminalSessionId,
-                                List<String> recentCommands);
+            List<String> recentCommands, List<Map<String, Object>> messageHistory);
 
     /**
      * 清除指定会话的里程碑记录
