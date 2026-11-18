@@ -54,7 +54,7 @@ public class TerminalStateProvider implements IContextProvider {
     }
 
     @Override
-    public boolean enable() {
+    public boolean enabled() {
         return true;
     }
 

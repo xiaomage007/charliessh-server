@@ -42,7 +42,7 @@ public interface IContextProvider {
     /**
      * 是否启用
      */
-    boolean enable();
+    boolean enabled();
 
     /**
      * 采集上下文

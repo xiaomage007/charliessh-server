@@ -65,7 +65,7 @@ public class ToolResultProvider implements IContextProvider {
     }
 
     @Override
-    public boolean enable() {
+    public boolean enabled() {
         return true;
     }
 

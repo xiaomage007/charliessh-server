@@ -1,7 +1,18 @@
 package com.charlie.ai.domain.agent.service.context;
 
+import com.charlie.ai.domain.agent.model.valobj.prompt.MilestoneVO;
+import com.charlie.ai.domain.agent.model.valobj.prompt.PromptContextVO;
 import com.charlie.ai.domain.agent.service.IChatContextService;
+import com.charlie.ai.domain.agent.service.context.provider.IContextProvider;
+import com.charlie.ai.domain.agent.service.context.provider.impl.ToolResultProvider;
+import com.charlie.ai.domain.agent.service.context.reducer.impl.HybridReducer;
+import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
  * @Description: 上下文管理领域服务（context 包的聚合核心）
@@ -53,5 +64,61 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ChatContextService implements IChatContextService {
+
+    private static final int DEFAULT_MAX_CONTEXT_TOKENS = 8000;
+
+    private final List<IContextProvider> providers;
+
+    @Resource
+    private HybridReducer hybridReducer;
+
+    @Resource
+    private ToolResultProvider toolResultProvider;
+
+    public ChatContextService(List<IContextProvider> providers) {
+        this.providers = providers;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public PromptContextVO buildPromptContext(String sessionId, String userId,
+            String terminalSessionId, List<Map<String, Object>> messageHistory) {
+
+        Map<String, Object> finalCtx = new HashMap<>();
+
+        for (IContextProvider provider : providers) {
+            if (!provider.enabled()) continue;
+            Map<String, Object> ctx = provider.provide(sessionId, userId, terminalSessionId,
+                    messageHistory);
+            if (ctx != null) {
+                finalCtx.putAll(ctx);
+            }
+        }
+
+        return PromptContextVO.builder()
+                              .osInfo((String) finalCtx.get("osInfo"))
+                              .currentUser((String) finalCtx.get("currentUser"))
+                              .currentDirectory((String) finalCtx.get("currentDirectory"))
+                              .serverInfo((String) finalCtx.get("serverInfo"))
+                              .milestoneVOS((List<MilestoneVO>) finalCtx.get("milestoneVOS"))
+                              .toolResultSummary((String) finalCtx.get("toolResultSummary"))
+                              .taskDescription((String) finalCtx.get("taskDescription"))
+                              .build();
+
+    }
+
+    @Override
+    public List<Map<String, Object>> trimHistory(List<Map<String, Object>> history,
+            int tokenBudget) {
+        if (history == null || history.isEmpty()) return Collections.emptyList();
+
+        return hybridReducer.reduce(history, tokenBudget > 0 ? tokenBudget :
+                DEFAULT_MAX_CONTEXT_TOKENS);
+    }
+
+    @Override
+    public void pushToolResult(String sessionId, String toolName, String result) {
+        toolResultProvider.pushResult(sessionId, toolName, result);
+    }
 
 }
