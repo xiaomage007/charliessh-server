@@ -6,6 +6,7 @@ import com.google.adk.sessions.Session;
 import com.google.common.collect.ImmutableList;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Single;
+import org.springframework.stereotype.Component;
 
 /**
  *
@@ -13,6 +14,7 @@ import io.reactivex.rxjava3.core.Single;
  * @author Charlie
  * @since 2026/11/19
  */
+@Component
 public class CustomAdkMemoryService implements BaseMemoryService {
 
     @Override
