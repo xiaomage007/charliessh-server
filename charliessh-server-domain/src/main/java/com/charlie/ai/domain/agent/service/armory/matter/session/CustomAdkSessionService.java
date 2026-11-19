@@ -122,7 +122,7 @@ public class CustomAdkSessionService implements BaseSessionService {
                 .computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
         appState.computeIfAbsent(appName, k -> new ConcurrentHashMap<>());
 
-        return null;
+        return Single.just(toSession(sessionSnapshot, Optional.empty()));
     }
 
     @Override
