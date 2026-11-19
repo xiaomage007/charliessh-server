@@ -1,8 +1,10 @@
 package com.charlie.ai.domain.agent.model.valobj;
 
-import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.runner.Runner;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * @description: Ai Agent 智能体注册值对象
@@ -11,8 +13,8 @@ import lombok.Getter;
  */
 @Getter
 @Builder
-//@AllArgsConstructor
-//@NoArgsConstructor
+@AllArgsConstructor
+@NoArgsConstructor
 public class AiAgentRegisterVO {
     /**
      * 智能体名称
@@ -37,5 +39,5 @@ public class AiAgentRegisterVO {
     /**
      * 智能体执行对象
      */
-    private InMemoryRunner runner;
+    private Runner runner;
 }
