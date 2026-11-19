@@ -6,17 +6,20 @@ import com.charlie.ai.domain.agent.model.valobj.AiAgentConfigTableVO;
 import com.charlie.ai.domain.agent.model.valobj.AiAgentRegisterVO;
 import com.charlie.ai.domain.agent.service.armory.AbstractArmorySupport;
 import com.charlie.ai.domain.agent.service.armory.factory.DefaultArmoryFactory;
+import com.charlie.ai.domain.agent.service.armory.matter.session.factory.CustomRunnerFactory;
 import com.charlie.ai.types.enums.ResponseCode;
 import com.charlie.ai.types.exception.AppException;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.SequentialAgent;
 import com.google.adk.plugins.BasePlugin;
 import com.google.adk.runner.InMemoryRunner;
+import com.google.adk.runner.Runner;
 import com.google.common.collect.ImmutableList;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -29,6 +32,9 @@ import java.util.List;
 @Service
 public class RunnerNode extends AbstractArmorySupport {
 
+    @Resource
+    private CustomRunnerFactory customRunnerFactory;
+
     @Override
     protected AiAgentRegisterVO doApply(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
         log.info("Ai Agent 装配操作 - RunnerNode");
@@ -40,7 +46,7 @@ public class RunnerNode extends AbstractArmorySupport {
         String agentName = agent.getAgentName();
         String agentDesc = agent.getAgentDesc();
 
-        InMemoryRunner runner = getRunner(dynamicContext, aiAgentConfigTableVO, appName);
+        Runner runner = getRunner(dynamicContext, aiAgentConfigTableVO, appName);
 
         AiAgentRegisterVO aiAgentRegisterVO = AiAgentRegisterVO.builder()
                 .appName(appName)
@@ -56,7 +62,7 @@ public class RunnerNode extends AbstractArmorySupport {
         return aiAgentRegisterVO;
     }
 
-    private InMemoryRunner getRunner(DefaultArmoryFactory.DynamicContext dynamicContext, AiAgentConfigTableVO aiAgentConfigTableVO, String appName) {
+    private Runner getRunner(DefaultArmoryFactory.DynamicContext dynamicContext, AiAgentConfigTableVO aiAgentConfigTableVO, String appName) {
         AiAgentConfigTableVO.Module.Runner runnerConfig = aiAgentConfigTableVO.getModule().getRunner();
 
         // 装配发生在 ApplicationReadyEvent 阶段，任何一个配置表漏配 runner 都会让整个 Spring 上下文启动失败；
@@ -94,8 +100,7 @@ public class RunnerNode extends AbstractArmorySupport {
             plugins = ImmutableList.of();
         }
 
-
-        return new InMemoryRunner(baseAgent, appName, plugins);
+        return customRunnerFactory.create(baseAgent, appName, plugins);
     }
 
     @Override
