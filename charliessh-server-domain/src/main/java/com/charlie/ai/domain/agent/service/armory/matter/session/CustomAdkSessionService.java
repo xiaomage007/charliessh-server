@@ -1,5 +1,7 @@
 package com.charlie.ai.domain.agent.service.armory.matter.session;
 
+import com.charlie.ai.domain.agent.service.armory.matter.session.model.SessionSnapshot;
+import com.google.adk.events.Event;
 import com.google.adk.sessions.*;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
@@ -7,8 +9,13 @@ import io.reactivex.rxjava3.core.Single;
 import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 自定义 ADK Session 服务。
@@ -55,16 +62,84 @@ import java.util.concurrent.ConcurrentMap;
 @Component
 public class CustomAdkSessionService implements BaseSessionService {
 
+    /** Session 最多保留的 event 条数，防止框架层历史无限膨胀。 */
+    private static final int MAX_EVENTS = 20;
+    /** assistant/model 文本的最大保留长度。 */
+    private static final int MAX_ASSISTANT_TEXT = 2000;
+    /** tool 结果文本的最大保留长度。 */
+    private static final int MAX_TOOL_TEXT = 1000;
+    /** 最多保留的用户轮次数；轮次是比“消息条数”更自然的对话单位。 */
+    private static final int MAX_TURNS = 4;
 
+    /**
+     * appName -> userId -> sessionId -> SessionSnapshot
+     */
+    private final ConcurrentMap<String, ConcurrentMap<String, ConcurrentMap<String, SessionSnapshot>>> sessions = new ConcurrentHashMap<>();
+    /**
+     * 预留的 user 级别状态存储。
+     */
+    private final ConcurrentMap<String, ConcurrentMap<String, ConcurrentMap<String, Object>>> userState = new ConcurrentHashMap<>();
+    /**
+     * 预留的 app 级别状态存储。
+     */
+    private final ConcurrentMap<String, ConcurrentMap<String, Object>> appState = new ConcurrentHashMap<>();
+
+    /**
+     * 创建一个新的轻量 Session 快照。
+     *
+     * <p>这里的设计很克制：
+     * 只初始化当前会话运行必需的 state、event 容器和更新时间，
+     * 不做更重的持久化、归档、索引等动作。
+     *
+     * <p>案例：
+     * <pre>
+     *   appName   = walissh-app
+     *   userId    = user-001
+     *   sessionId = react-session-01
+     *
+     *   创建后得到：
+     *   sessions["walissh-app"]["user-001"]["react-session-01"] = SessionSnapshot
+     * </pre>
+     *
+     * @param appName      应用名
+     * @param userId       用户 ID
+     * @param initialState 初始状态
+     * @param sessionId    会话 ID，若为空则自动生成
+     * @return 对外暴露的 ADK Session
+     */
     @Override
     public Single<Session> createSession(String appName, String userId,
-            @Nullable ConcurrentMap<String, Object> state, @Nullable String sessionId) {
-        return null;
+            @Nullable ConcurrentMap<String, Object> initialState, @Nullable String sessionId) {
+        String finalSessionId = Optional.ofNullable(sessionId)
+                                        .map(String::trim)
+                                        .filter(s -> !s.isEmpty())
+                                        .orElseGet(() -> UUID.randomUUID()
+                                                             .toString());
+        State state = new State(initialState == null ? new ConcurrentHashMap<>() : initialState);
+
+        SessionSnapshot sessionSnapshot = SessionSnapshot.builder()
+                                                         .sessionKey(new SessionKey(appName, userId,
+                                                                 finalSessionId))
+                                                         .state(state)
+                                                         .rawEvents(new CopyOnWriteArrayList<>())
+                                                         .lastUpdateTime(Instant.now())
+                                                         .build();
+
+        sessions.computeIfAbsent(appName, k -> new ConcurrentHashMap<>())
+                .computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
+                .put(finalSessionId, sessionSnapshot);
+
+        userState.computeIfAbsent(appName, k -> new ConcurrentHashMap<>())
+                 .computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
+        appState.computeIfAbsent(appName, k -> new ConcurrentHashMap<>());
+
+        return Single.just(toSession(sessionSnapshot, Optional.empty()));
     }
 
     @Override
     public Maybe<Session> getSession(String appName, String userId, String sessionId,
             Optional<GetSessionConfig> config) {
+
         return null;
     }
 
@@ -81,5 +156,25 @@ public class CustomAdkSessionService implements BaseSessionService {
     @Override
     public Single<ListEventsResponse> listEvents(String appName, String userId, String sessionId) {
         return null;
+    }
+
+    /**
+     * 将内部快照对象转换为对外暴露的 ADK Session。
+     *
+     * <p>内部真实存储用的是 {@link SessionSnapshot}，
+     * 对外仍然按 ADK 的 Session 语义返回，方便 Runner 正常使用。
+     *
+     * @param snapshot       内部快照
+     * @param eventsOverride 可选的事件覆盖集
+     * @return ADK Session
+     */
+    private Session toSession(SessionSnapshot snapshot, Optional<List<Event>> eventsOverride) {
+        List<Event> events = eventsOverride.orElseGet(snapshot::getRawEvents);
+        Session session = Session.builder(snapshot.getSessionKey())
+                                 .state(snapshot.getState())
+                                 .events(events)
+                                 .build();
+        session.lastUpdateTime(snapshot.getLastUpdateTime());
+        return session;
     }
 }
