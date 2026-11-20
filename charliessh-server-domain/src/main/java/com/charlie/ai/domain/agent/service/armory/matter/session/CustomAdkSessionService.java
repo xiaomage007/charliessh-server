@@ -62,6 +62,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Component
 public class CustomAdkSessionService implements BaseSessionService {
 
+    /** Session 最多保留的 event 条数，防止框架层历史无限膨胀。 */
+    private static final int MAX_EVENTS = 20;
+    /** assistant/model 文本的最大保留长度。 */
+    private static final int MAX_ASSISTANT_TEXT = 2000;
+    /** tool 结果文本的最大保留长度。 */
+    private static final int MAX_TOOL_TEXT = 1000;
+    /** 最多保留的用户轮次数；轮次是比“消息条数”更自然的对话单位。 */
+    private static final int MAX_TURNS = 4;
+
     /**
      * appName -> userId -> sessionId -> SessionSnapshot
      */
@@ -100,26 +109,28 @@ public class CustomAdkSessionService implements BaseSessionService {
      */
     @Override
     public Single<Session> createSession(String appName, String userId,
-                                         @Nullable ConcurrentMap<String, Object> initialState, @Nullable String sessionId) {
+            @Nullable ConcurrentMap<String, Object> initialState, @Nullable String sessionId) {
         String finalSessionId = Optional.ofNullable(sessionId)
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .orElseGet(() -> UUID.randomUUID().toString());
+                                        .map(String::trim)
+                                        .filter(s -> !s.isEmpty())
+                                        .orElseGet(() -> UUID.randomUUID()
+                                                             .toString());
         State state = new State(initialState == null ? new ConcurrentHashMap<>() : initialState);
 
         SessionSnapshot sessionSnapshot = SessionSnapshot.builder()
-                .sessionKey(new SessionKey(appName, userId, finalSessionId))
-                .state(state)
-                .rawEvents(new CopyOnWriteArrayList<>())
-                .lastUpdateTime(Instant.now())
-                .build();
+                                                         .sessionKey(new SessionKey(appName, userId,
+                                                                 finalSessionId))
+                                                         .state(state)
+                                                         .rawEvents(new CopyOnWriteArrayList<>())
+                                                         .lastUpdateTime(Instant.now())
+                                                         .build();
 
         sessions.computeIfAbsent(appName, k -> new ConcurrentHashMap<>())
                 .computeIfAbsent(userId, k -> new ConcurrentHashMap<>())
                 .put(finalSessionId, sessionSnapshot);
 
         userState.computeIfAbsent(appName, k -> new ConcurrentHashMap<>())
-                .computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
+                 .computeIfAbsent(userId, k -> new ConcurrentHashMap<>());
         appState.computeIfAbsent(appName, k -> new ConcurrentHashMap<>());
 
         return Single.just(toSession(sessionSnapshot, Optional.empty()));
@@ -127,7 +138,8 @@ public class CustomAdkSessionService implements BaseSessionService {
 
     @Override
     public Maybe<Session> getSession(String appName, String userId, String sessionId,
-                                     Optional<GetSessionConfig> config) {
+            Optional<GetSessionConfig> config) {
+
         return null;
     }
 
@@ -159,9 +171,9 @@ public class CustomAdkSessionService implements BaseSessionService {
     private Session toSession(SessionSnapshot snapshot, Optional<List<Event>> eventsOverride) {
         List<Event> events = eventsOverride.orElseGet(snapshot::getRawEvents);
         Session session = Session.builder(snapshot.getSessionKey())
-                .state(snapshot.getState())
-                .events(events)
-                .build();
+                                 .state(snapshot.getState())
+                                 .events(events)
+                                 .build();
         session.lastUpdateTime(snapshot.getLastUpdateTime());
         return session;
     }
