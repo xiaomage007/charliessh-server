@@ -77,6 +77,11 @@ public class DefaultReActFactory {
         // ══════════════════════════════════════════════════════════
 
         /**
+         * 原始用户任务描述（防止在多轮交互中被前缀污染）
+         */
+        private String originalUserTask;
+
+        /**
          * 消息历史
          * 格式：{ role: "user"/"assistant"/"tool", content: "...", tool_call_id?: "..." }
          */
@@ -84,16 +89,22 @@ public class DefaultReActFactory {
         private List<Map<String, Object>> messageHistory = new ArrayList<>();
 
         /**
-         * 当前轮次的工具调用列表
+         * 当前轮次的工具调用列表（缓冲）
          */
         @Builder.Default
         private List<Map<String, Object>> currentToolCalls = new ArrayList<>();
 
         /**
-         * 当前轮次的工具执行结果列表
+         * 当前轮次的工具执行结果列表（缓冲）
          */
         @Builder.Default
         private List<Map<String, Object>> currentToolResults = new ArrayList<>();
+
+        /**
+         * 整个会话中实际执行的工具调用记录（供最终结果展示）
+         */
+        @Builder.Default
+        private List<Map<String, Object>> executedToolCalls = new ArrayList<>();
 
         // ══════════════════════════════════════════════════════════
         //  ReAct 循环状态
@@ -121,7 +132,7 @@ public class DefaultReActFactory {
         private int maxToolCallsPerRound;
 
         /**
-         * 总工具调用次数
+         * 总工具调用次数 (作为真值源)
          */
         @Builder.Default
         private AtomicInteger totalToolCallCount = new AtomicInteger(0);
@@ -241,12 +252,13 @@ public class DefaultReActFactory {
 
         public void appendToolMessage(String toolCallId, String content) {
             Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content",
-                                             content);
+                    content);
             messageHistory.add(msg);
         }
 
         public void addRecentCommand(String command) {
-            if (command == null || command.trim().isEmpty()) return;
+            if (command == null || command.trim()
+                                          .isEmpty()) return;
             recentCommands.add(command.trim());
             while (recentCommands.size() > 20) {
                 recentCommands.remove(0);
