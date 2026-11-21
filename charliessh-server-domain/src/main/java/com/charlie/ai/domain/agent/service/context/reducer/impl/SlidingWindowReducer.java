@@ -1,6 +1,8 @@
 package com.charlie.ai.domain.agent.service.context.reducer.impl;
 
 import com.charlie.ai.domain.agent.service.context.reducer.IMessageReducer;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -55,9 +57,75 @@ public class SlidingWindowReducer implements IMessageReducer {
         return List.of();
     }
 
+    /**
+     * 估算单条消息 token 数。
+     *
+     * <p>这里采用非常轻量的经验估算：content.length() / 2。
+     * 目的不是得到绝对精确的 token 数，而是给裁剪算法一个“够用的体积感知”。
+     *
+     * <p>案例：
+     * <pre>
+     *   content 长度 = 200 字符
+     *   估算 token = 100
+     * </pre>
+     *
+     * @param message 单条消息
+     * @return 估算 token 数
+     */
     private int estimateToken(Map<String, Object> message) {
-        String content = String.valueOf(message.get("content"));
-        return content != null ? content.length() / 2 : 0;
+        String content = stringValue(message.get("content"));
+        return content.length();
+    }
+
+    /**
+     * 安全获取对象字符串值，避免 null 干扰判断逻辑。
+     *
+     * @param value 原始对象
+     * @return 非 null 字符串
+     */
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    /**
+     * 统计单个消息组的 token 消耗。
+     *
+     * <p>案例：
+     * <pre>
+     *   group = [
+     *     assistant(tool_calls, content 长度 40),
+     *     tool(result, content 长度 200)
+     *   ]
+     *
+     *   groupTokens = 40/2 + 200/2 = 120
+     * </pre>
+     *
+     * @param group 消息组
+     * @return 该组总 token 数
+     */
+    private int estimateTokens(MessageGroup group) {
+        return group.getMessages()
+                    .stream()
+                    .mapToInt(this::estimateToken)
+                    .sum();
+    }
+
+    /**
+     * 消息组。
+     *
+     * <p>滑动窗口阶段按组保留，保证上下文单元完整。
+     */
+    @Data
+    @AllArgsConstructor
+    private static class MessageGroup {
+        /**
+         * 组内消息，按原始顺序保存。
+         */
+        private List<Map<String, Object>> messages;
+        /**
+         * 该组在原始消息列表中的起始索引。
+         */
+        private int startIndex;
     }
 
 }
