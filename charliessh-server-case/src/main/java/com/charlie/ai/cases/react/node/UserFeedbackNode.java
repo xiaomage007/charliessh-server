@@ -5,23 +5,22 @@ import com.charlie.ai.api.dto.ChatRequestDTO;
 import com.charlie.ai.api.dto.ReActResultDTO;
 import com.charlie.ai.cases.react.AbstractAIAgentReActSupport;
 import com.charlie.ai.cases.react.factory.DefaultReActFactory;
+import com.charlie.ai.domain.agent.service.IChatContextService;
+import com.charlie.ai.domain.agent.service.IPromptService;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter;
 
 /**
- * @Description: ReAct 用户反馈节点（结果发送 + 清理）
+ * ReAct 用户反馈/结束节点
  *
  * <p>职责：
- * 1. 构建最终 ReActResultDTO
- * 2. 发送 done SSE 事件
- * 3. 关闭 Emitter
- * 4. 清理 ThreadLocal 上下文
+ * 1. 组装最终结果
+ * 2. 清理会话绑定的终端资源
+ * 3. 将 DynamicContext 中的统计信息同步到 ResultDTO
+ * 4. 清理会话级别的上下文缓存（如工具摘要、里程碑等）
  *
- * <p>这是 ReAct 循环链路的终点，负责：
- * - 将累积的响应文本封装为最终结果
- * - 通过 SSE 发送 done 事件通知前端
- * - 清理终端会话绑定
  * @Author: Charlie
  * @Date: 2026/11/10 7:42
  */
@@ -29,95 +28,52 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyEmitter
 @Component("reactUserFeedbackNode")
 public class UserFeedbackNode extends AbstractAIAgentReActSupport {
 
+    @Resource
+    private IChatContextService chatContextService;
+
+    @Resource
+    private IPromptService promptService;
 
     @Override
-    protected ReActResultDTO doApply(ChatRequestDTO chatRequestDTO,
-                                     DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
-        log.info("ReAct UserFeedbackNode - 发送最终结果");
+    protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+        log.info("ReAct UserFeedbackNode - 生成最终结果");
 
-        ResponseBodyEmitter emitter = dynamicContext.getEmitter();
+        String sessionId = dynamicContext.getSessionId();
 
-        try {
-            // 1. 构建最终结果
-            ReActResultDTO result = buildFinalResult(dynamicContext);
+        // 1. 构建最终结果
+        ReActResultDTO result = dynamicContext.getResult();
+        result.setFinalResponse(dynamicContext.getAssistantContent() != null
+                ? dynamicContext.getAssistantContent()
+                                .toString() : "");
 
-            // 2. 发送 done SSE 事件
-            sendDoneEvent(emitter, result);
+        // 2. 同步真实的统计数据
+        result.setTotalSteps(dynamicContext.getStep());
+        result.setTotalToolCalls(dynamicContext.getTotalToolCallCount()
+                                               .get());
 
-            // 3. 关闭 emitter
-            emitter.complete();
+        // 3. 将会话中实际执行的工具调用记录设置到结果中
+        result.setToolCalls(dynamicContext.getExecutedToolCalls());
 
-            log.info("ReAct 完成 - 步数: {}, 工具调用: {}, 停止原因: {}", result.getTotalSteps(),
-                     result.getTotalToolCalls(), result.getStopReason() != null ? result.getStopReason() : "completed");
+        // 4. 清理资源绑定和缓存
+        unbindTerminalSession(sessionId);
+        clearCurrentTerminalSession();
+        chatContextService.clearSessionContext(sessionId);
+        promptService.clearMilestones(sessionId);
 
-            return result;
+        log.info("会话 {} 结束，总步数: {}, 总工具调用: {}, 状态: {}",
+                sessionId, result.getTotalSteps(), result.getTotalToolCalls(),
+                dynamicContext.getStopReason());
 
-        } catch (Exception e) {
-            log.error("ReAct UserFeedbackNode 发送失败", e);
-            try {
-                emitter.completeWithError(e);
-            } catch (Exception ignored) {
-            }
-            throw e;
-        } finally {
-            // 4. 清理上下文
-            cleanup(dynamicContext);
-        }
+        return result;
     }
 
     @Override
     public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(
-            ChatRequestDTO chatRequestDTO, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+            ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+        // 这是链条最后一环
         return defaultStrategyHandler;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    //  构建最终结果
-    // ═══════════════════════════════════════════════════════════════
-
-    /**
-     * 构建最终结果 DTO
-     */
-    private ReActResultDTO buildFinalResult(DefaultReActFactory.DynamicContext dynamicContext) {
-        String fullText = dynamicContext.getAssistantContent() != null ? dynamicContext.getAssistantContent()
-                                                                                       .toString() : "";
-
-        String stopReason = dynamicContext.getStopReason();
-        if (stopReason == null) {
-            stopReason = "completed";
-        }
-
-        return ReActResultDTO.builder()
-                             .content(fullText)
-                             .totalSteps(dynamicContext.getStep())
-                             .totalToolCalls(dynamicContext.getResult() != null ? dynamicContext.getResult()
-                                                                                                .getTotalToolCalls() : 0)
-                             .maxStepsReached("max_steps".equals(stopReason))
-                             .userStopped("user_stop".equals(stopReason))
-                             .idleTimeout("idle_timeout".equals(stopReason))
-                             .stopReason(stopReason)
-                             .toolCalls(dynamicContext.getCurrentToolCalls())
-                             .toolResults(dynamicContext.getCurrentToolResults())
-                             .build();
-    }
-
-    /**
-     * 清理上下文资源
-     */
-    private void cleanup(DefaultReActFactory.DynamicContext dynamicContext) {
-        try {
-            // 清除终端会话绑定
-            String sessionId = dynamicContext.getSessionId();
-            if (sessionId != null) {
-                unbindTerminalSession(sessionId);
-            }
-
-            // 清除 ThreadLocal
-            clearCurrentTerminalSession();
-
-            log.debug("ReAct 上下文清理完成 sessionId={}", sessionId);
-        } catch (Exception e) {
-            log.warn("ReAct 上下文清理异常: {}", e.getMessage());
-        }
-    }
 }
