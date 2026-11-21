@@ -34,7 +34,8 @@ public class RootNode extends AbstractAIAgentReActSupport {
     private static final int DEFAULT_MAX_TOOL_CALLS_PER_ROUND = 10;
 
     @Override
-    protected ReActResultDTO doApply(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+    protected ReActResultDTO doApply(ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
         log.info("ReAct RootNode - 初始化上下文");
 
         // 1. 提取会话参数
@@ -47,11 +48,14 @@ public class RootNode extends AbstractAIAgentReActSupport {
         // 2. 绑定终端会话（ThreadLocal，支持异步线程继承）
         if (terminalSessionId != null && !terminalSessionId.isEmpty()) {
             setCurrentTerminalSession(terminalSessionId);
+            bindTerminalSession(sessionId, terminalSessionId);
         } else {
             // 尝试从会话绑定中获取
             String boundTerminal = getTerminalSession(sessionId);
             if (boundTerminal != null) {
                 setCurrentTerminalSession(boundTerminal);
+                // 补齐 dynamicContext 中的值
+                dynamicContext.setTerminalSessionId(boundTerminal);
             }
         }
 
@@ -59,7 +63,13 @@ public class RootNode extends AbstractAIAgentReActSupport {
         dynamicContext.setSessionId(sessionId);
         dynamicContext.setUserId(userId);
         dynamicContext.setAgentId(agentId);
-        dynamicContext.setTerminalSessionId(terminalSessionId);
+        if (dynamicContext.getTerminalSessionId() == null) {
+            dynamicContext.setTerminalSessionId(terminalSessionId);
+        }
+
+        // 记录首轮最干净的原始任务，防止在长对话或前缀注入后被污染
+        dynamicContext.setOriginalUserTask(message);
+
         dynamicContext.setMessageHistory(new java.util.ArrayList<>());
         dynamicContext.setCurrentToolCalls(new java.util.ArrayList<>());
         dynamicContext.setCurrentToolResults(new java.util.ArrayList<>());
@@ -70,25 +80,29 @@ public class RootNode extends AbstractAIAgentReActSupport {
 
         // 4. 初始化结果 DTO
         ReActResultDTO result = ReActResultDTO.builder()
-                .totalSteps(0)
-                .totalToolCalls(0)
-                .maxStepsReached(false)
-                .userStopped(false)
-                .idleTimeout(false)
-                .build();
+                                              .totalSteps(0)
+                                              .totalToolCalls(0)
+                                              .maxStepsReached(false)
+                                              .userStopped(false)
+                                              .idleTimeout(false)
+                                              .build();
         dynamicContext.setResult(result);
 
         // 5. 追加用户消息到历史
         dynamicContext.appendUserMessage(message);
 
-        log.info("ReAct RootNode - 初始化完成 sessionId={}, userId={}, agentId={}, terminalSessionId={}",
-                sessionId, userId, agentId, terminalSessionId);
+        log.info(
+                "ReAct RootNode - 初始化完成 sessionId={}, userId={}, agentId={}, terminalSessionId={}",
+                sessionId, userId, agentId, dynamicContext.getTerminalSessionId());
 
         return router(requestParameter, dynamicContext);
     }
 
     @Override
-    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(ChatRequestDTO requestParameter, DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
+    public StrategyHandler<ChatRequestDTO, DefaultReActFactory.DynamicContext, ReActResultDTO> get(
+            ChatRequestDTO requestParameter,
+            DefaultReActFactory.DynamicContext dynamicContext) throws Exception {
         return getBean("reactAiCallNode");
     }
+
 }

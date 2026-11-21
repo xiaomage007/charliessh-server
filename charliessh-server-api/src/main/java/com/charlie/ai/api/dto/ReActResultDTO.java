@@ -23,7 +23,7 @@ public class ReActResultDTO {
     /**
      * 最终响应内容
      */
-    private String content;
+    private String finalResponse;
 
     /**
      * 总执行步数
