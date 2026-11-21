@@ -58,4 +58,12 @@ public interface IChatContextService {
      */
     void pushToolResult(String sessionId, String toolName, String result);
 
+
+    /**
+     * 清理指定会话的上下文缓存
+     *
+     * @param sessionId 会话 ID
+     */
+    void clearSessionContext(String sessionId);
+
 }

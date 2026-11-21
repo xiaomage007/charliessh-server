@@ -121,4 +121,18 @@ public class ChatContextService implements IChatContextService {
         toolResultProvider.pushResult(sessionId, toolName, result);
     }
 
+    /**
+     * 它主要清理 ToolResultProvider 中按 session 缓存的工具结果和摘要。为什么需要清理？
+     * 因为工具结果是会话级临时上下文，适合当前 ReAct 循环复用，不适合跨会话或跨任务残留。
+     * 否则上一次“排查 nginx”的工具摘要，可能污染下一次“安装 docker”的任务
+     *
+     * @param sessionId 会话 ID
+     */
+    @Override
+    public void clearSessionContext(String sessionId) {
+        if (sessionId != null) {
+            toolResultProvider.clear(sessionId);
+        }
+    }
+
 }
