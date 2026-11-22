@@ -1,6 +1,8 @@
 package com.charlie.ai.domain.agent.service;
 
 import com.charlie.ai.domain.agent.model.valobj.intent.IntentResultVO;
+import com.charlie.ai.domain.agent.model.valobj.intent.TaskStateVO;
+import org.springframework.ai.openai.api.OpenAiApi;
 
 /**
  * 意图识别服务接口
@@ -48,4 +50,26 @@ public interface IIntentService {
      */
     IntentResultVO reportFeedback(String sessionId, IntentResultVO lastIntent, boolean success,
             String toolResult);
+
+    /**
+     * 获取当前会话的任务态
+     */
+    TaskStateVO getTaskState(String sessionId);
+
+    /**
+     * 更新当前会话的任务态
+     */
+    void updateTaskState(String sessionId, TaskStateVO taskState);
+
+    /**
+     * 注入智能体的 API 配置，供 LLM 意图分类器复用。
+     * <p>
+     * 由调用方（如 AiCallNode）在分类前传入 Agent 装配好的 OpenAiApi 和模型名，
+     * 使得意图识别不再需要单独配置模型，而是使用各智能体自己的配置。
+     *
+     * @param openAiApi Agent 装配链路构建的 OpenAiApi
+     * @param modelName Agent 配置的模型名
+     */
+    void configure(OpenAiApi openAiApi, String modelName);
+
 }
