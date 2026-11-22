@@ -4,6 +4,7 @@ import com.charlie.ai.domain.agent.model.valobj.intent.IntentResultVO;
 import com.charlie.ai.domain.agent.model.valobj.intent.TaskStateVO;
 import com.charlie.ai.domain.agent.service.IIntentService;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.stereotype.Service;
 
 /**
  * 意图识别服务（调度入口）
@@ -58,6 +59,7 @@ import org.springframework.ai.openai.api.OpenAiApi;
  * @author Charlie
  * @since 2026/11/22
  */
+@Service
 public class IntentService implements IIntentService {
     @Override
     public IntentResultVO classify(String sessionId, String userId, String message) {
