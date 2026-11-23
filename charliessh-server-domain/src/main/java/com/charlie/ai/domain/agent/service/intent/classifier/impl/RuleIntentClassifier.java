@@ -47,18 +47,21 @@ import java.util.List;
 @Component
 public class RuleIntentClassifier implements IIntentClassifier {
 
-    @Override
-    public IntentResultVO classify(String message, ConversationContextVO context) {
-        return null;
-    }
+    /**
+     * 当有 ≥2 个意图达到该置信度时，判定为复合指令
+     */
+    private static final double COMPOUND_THRESHOLD = 0.5;
+
+    private static final List<String> CONTINUE_KEYWORDS = List.of("继续", "continue", "接着",
+            "往下", "go on");
 
     /**
      * 这里提取了一些运维场景的常用操作，也可以按需补充意图关键词。
      */
     private static final List<IntentRuleVO> RULES = List.of(
             rule(IntentTypeEnumVO.DIAGNOSE,
-                    List.of("挂了", "宕机", "down", "502", "503", "504", "OOM", "满", "过高", "异常",
-                            "报错", "告警", "超时", "timeout", "crash", "panic", "fatal"),
+                    List.of("挂了", "宕机", "down", "502", "503", "504", "OOM", "满", "过高",
+                            "异常", "报错", "告警", "超时", "timeout", "crash", "panic", "fatal"),
                     List.of("为什么.*(?:挂|报错|失败|不通)", "排查.*问题", "分析.*原因",
                             "(?:宕机|挂了|报错|超时|OOM|crash|panic)")),
 
@@ -68,13 +71,15 @@ public class RuleIntentClassifier implements IIntentClassifier {
                             "(?:改|修改|调整|调优|设置).*(?:配置|参数|config)")),
 
             rule(IntentTypeEnumVO.DEPLOY,
-                    List.of("部署", "deploy", "发布", "回滚", "rollback", "上线", "更新版本", "重启服务"),
+                    List.of("部署", "deploy", "发布", "回滚", "rollback", "上线", "更新版本",
+                            "重启服务"),
                     List.of("(?:发布|部署).*版本", "回滚.*版本")),
 
             rule(IntentTypeEnumVO.MONITOR,
                     List.of("查看", "监控", "日志", "log", "cpu", "内存", "磁盘", "网络", "流量",
                             "负载", "load", "使用率", "状态", "top", "htop", "free", "df"),
-                    List.of("(?:看|查|check).*(?:状态|情况|使用率)", "tail.*log", "(?:top|htop|free|df)(?: |$)")),
+                    List.of("(?:看|查|check).*(?:状态|情况|使用率)", "tail.*log",
+                            "(?:top|htop|free|df)(?: |$)")),
 
             rule(IntentTypeEnumVO.SECURITY,
                     List.of("防火墙", "firewall", "iptables", "权限", "permission", "ssh", "密钥",
@@ -96,6 +101,13 @@ public class RuleIntentClassifier implements IIntentClassifier {
                             "(?:grep|find|locate|ps|ls)(?: |$)"))
     );
 
+    @Override
+    public IntentResultVO classify(String message, ConversationContextVO context) {
+        return null;
+    }
+
+
+
     private static IntentRuleVO rule(IntentTypeEnumVO intent, List<String> keywords,
             List<String> patterns) {
         /**
@@ -108,11 +120,11 @@ public class RuleIntentClassifier implements IIntentClassifier {
          * @param patterns  正则表达式列表（用于精确模式匹配）
          * @return 构建好的 IntentRuleVO 实例
          */
-        IntentRuleVO r = new IntentRuleVO();
-        r.setIntent(intent);
-        r.setKeywords(keywords);
-        r.setPatterns(patterns);
-        return r;
+        IntentRuleVO intentRuleVO = new IntentRuleVO();
+        intentRuleVO.setIntent(intent);
+        intentRuleVO.setKeywords(keywords);
+        intentRuleVO.setPatterns(patterns);
+        return intentRuleVO;
     }
 
 }
