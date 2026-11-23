@@ -106,26 +106,24 @@ public class RuleIntentClassifier implements IIntentClassifier {
         // CONTINUE：仅当消息本身就是一个"继续"指令（去掉继续类词后几乎无其他内容）时才命中，
         // 避免"继续部署""继续排查"这类带明确动作的复合指令被误判为 CONTINUE
         if (isContinueDirective(lowerMsg)) {
-            if (context != null && context.getTaskState() != null
-                    && !context.getTaskState()
-                               .isCompleted()
-                    && context.getTaskState()
-                              .getRootIntent() != null) {
+            if (context != null && context.getTaskState() != null && !context.getTaskState()
+                    .isCompleted() && context.getTaskState()
+                    .getRootIntent() != null) {
                 return IntentResultVO.builder()
-                                     .intent(IntentTypeEnumVO.CONTINUE)
-                                     .confidence(0.95)
-                                     .entities(Map.of("task", String.valueOf(context.getTaskState()
-                                                                                    .getCurrentStepIndex())))
-                                     .candidateIntents(List.of(context.getTaskState()
-                                                                      .getRootIntent()))
-                                     .build();
+                        .intent(IntentTypeEnumVO.CONTINUE)
+                        .confidence(0.95)
+                        .entities(Map.of("task", String.valueOf(context.getTaskState()
+                                .getCurrentStepIndex())))
+                        .candidateIntents(List.of(context.getTaskState()
+                                .getRootIntent()))
+                        .build();
             }
             // 没有进行中的任务态，CONTINUE 没有依据，交给主模型
             return IntentResultVO.builder()
-                                 .intent(IntentTypeEnumVO.CONTINUE)
-                                 .confidence(0.4)
-                                 .entities(Map.of())
-                                 .build();
+                    .intent(IntentTypeEnumVO.CONTINUE)
+                    .confidence(0.4)
+                    .entities(Map.of())
+                    .build();
         }
 
         // 计算每个意图的得分
@@ -135,22 +133,22 @@ public class RuleIntentClassifier implements IIntentClassifier {
             double score = 0.0;
 
             long hits = rule.getKeywords()
-                            .stream()
-                            .filter(lowerMsg::contains)
-                            .count();
+                    .stream()
+                    .filter(lowerMsg::contains)
+                    .count();
             if (hits > 0) {
                 score += Math.min(0.7, 0.5 + (hits - 1) * 0.1);
             }
 
             boolean patternHit = rule.getPatterns()
-                                     .stream()
-                                     .anyMatch(p -> Pattern.matches(".*" + p + ".*", message));
+                    .stream()
+                    .anyMatch(p -> Pattern.matches(".*" + p + ".*", message));
             if (patternHit) score += 0.2;
 
             if (context != null && context.getRecentIntents() != null) {
                 if (context.getRecentIntents()
-                           .stream()
-                           .anyMatch(h -> h.getIntent() == rule.getIntent())) {
+                        .stream()
+                        .anyMatch(h -> h.getIntent() == rule.getIntent())) {
                     score += 0.1;
                 }
             }
@@ -166,49 +164,47 @@ public class RuleIntentClassifier implements IIntentClassifier {
 
         if (scored.isEmpty()) {
             return IntentResultVO.builder()
-                                 .intent(IntentTypeEnumVO.UNKNOWN)
-                                 .confidence(0.0)
-                                 .entities(Map.of())
-                                 .build();
+                    .intent(IntentTypeEnumVO.UNKNOWN)
+                    .confidence(0.0)
+                    .entities(Map.of())
+                    .build();
         }
 
         // 复合意图检测：≥2 个意图达到阈值 → COMPOUND
         long highConfidenceCount = scored.stream()
-                                         .filter(e -> e.getValue() >= COMPOUND_THRESHOLD)
-                                         .count();
+                .filter(e -> e.getValue() >= COMPOUND_THRESHOLD)
+                .count();
         if (highConfidenceCount >= 2) {
             List<IntentTypeEnumVO> candidates = scored.stream()
-                                                      .map(Map.Entry::getKey)
-                                                      .collect(Collectors.toList());
+                    .map(Map.Entry::getKey)
+                    .collect(Collectors.toList());
             double compoundConfidence = Math.min(0.9, scored.get(0)
-                                                            .getValue());
+                    .getValue());
             return IntentResultVO.builder()
-                                 .intent(IntentTypeEnumVO.COMPOUND)
-                                 .confidence(compoundConfidence)
-                                 .entities(intentEntities.getOrDefault(scored.get(0)
-                                                                             .getKey(), Map.of()))
-                                 .candidateIntents(candidates)
-                                 .build();
+                    .intent(IntentTypeEnumVO.COMPOUND)
+                    .confidence(compoundConfidence)
+                    .entities(intentEntities.getOrDefault(scored.get(0)
+                            .getKey(), Map.of()))
+                    .candidateIntents(candidates)
+                    .build();
         }
 
         // 单一意图：返回主意图 + 候选（次优）
         IntentTypeEnumVO topIntent = scored.get(0)
-                                           .getKey();
+                .getKey();
         double topScore = scored.get(0)
-                                .getValue();
-        List<IntentTypeEnumVO> candidates = scored.size() > 1
-                ? scored.subList(1, scored.size())
-                        .stream()
-                        .map(Map.Entry::getKey)
-                        .collect(Collectors.toList())
-                : List.of();
+                .getValue();
+        List<IntentTypeEnumVO> candidates = scored.size() > 1 ? scored.subList(1, scored.size())
+                .stream()
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList()) : List.of();
 
         return IntentResultVO.builder()
-                             .intent(topIntent)
-                             .confidence(topScore)
-                             .entities(intentEntities.getOrDefault(topIntent, Map.of()))
-                             .candidateIntents(candidates)
-                             .build();
+                .intent(topIntent)
+                .confidence(topScore)
+                .entities(intentEntities.getOrDefault(topIntent, Map.of()))
+                .candidateIntents(candidates)
+                .build();
     }
 
     /**
@@ -225,8 +221,8 @@ public class RuleIntentClassifier implements IIntentClassifier {
      */
     private Map<String, String> extractEntities(String message, IntentTypeEnumVO intent) {
         Map<String, String> entities = new HashMap<>();
-        List<String> services = List.of("nginx", "redis", "mysql", "postgres", "docker",
-                "kafka", "rabbitmq", "elasticsearch", "tomcat", "spring");
+        List<String> services = List.of("nginx", "redis", "mysql", "postgres", "docker", "kafka", "rabbitmq",
+                "elasticsearch", "tomcat", "spring");
         services.stream()
                 .filter(message.toLowerCase()::contains)
                 .forEach(svc -> entities.put("service", svc));
@@ -257,7 +253,7 @@ public class RuleIntentClassifier implements IIntentClassifier {
             return false;
         }
         return CONTINUE_KEYWORDS.stream()
-                                .anyMatch(lowerMsg::contains);
+                .anyMatch(lowerMsg::contains);
     }
 
 
