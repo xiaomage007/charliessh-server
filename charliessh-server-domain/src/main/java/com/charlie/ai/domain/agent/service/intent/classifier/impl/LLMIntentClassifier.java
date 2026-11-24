@@ -275,23 +275,24 @@ public class LLMIntentClassifier implements IIntentClassifier {
         }
     }
 
+    /**
+     * 从 LLM 原始文本中提取首个 JSON 对象并解析；任一环节失败均降级 UNKNOWN，
+     * 含解释性文字或咒语等非 JSON 输出不会导致分类器抛异常。
+     * <p>
+     * 解析步骤：
+     * <ol>
+     *   <li>正则提取首个 {...} JSON 片段</li>
+     *   <li>解析为 Map，提取 intent/confidence/entities/candidates</li>
+     *   <li>将 candidates 列表转换为 IntentTypeEnumVO 列表（过滤无效值）</li>
+     *   <li>任何异常 → 返回 UNKNOWN(conf=0)</li>
+     * </ol>
+     *
+     * @param response LLM 返回的原始文本
+     * @return 解析后的 IntentResultVO，失败时返回 UNKNOWN
+     */
     @SuppressWarnings("unchecked")
     private IntentResultVO parseResponse(String response) {
-        /**
-         * 从 LLM 原始文本中提取首个 JSON 对象并解析；任一环节失败均降级 UNKNOWN，
-         * 含解释性文字或咒语等非 JSON 输出不会导致分类器抛异常。
-         * <p>
-         * 解析步骤：
-         * <ol>
-         *   <li>正则提取首个 {...} JSON 片段</li>
-         *   <li>解析为 Map，提取 intent/confidence/entities/candidates</li>
-         *   <li>将 candidates 列表转换为 IntentTypeEnumVO 列表（过滤无效值）</li>
-         *   <li>任何异常 → 返回 UNKNOWN(conf=0)</li>
-         * </ol>
-         *
-         * @param response LLM 返回的原始文本
-         * @return 解析后的 IntentResultVO，失败时返回 UNKNOWN
-         */
+
         try {
             // 提取 JSON 部分
             String json = response.replaceAll("(?s).*?(\\{.*}).*", "$1");
