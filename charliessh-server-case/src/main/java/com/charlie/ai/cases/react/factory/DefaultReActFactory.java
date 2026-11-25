@@ -1,6 +1,7 @@
 package com.charlie.ai.cases.react.factory;
 
 import com.charlie.ai.api.dto.ReActResultDTO;
+import com.charlie.ai.domain.agent.model.valobj.intent.IntentResultVO;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -208,6 +209,20 @@ public class DefaultReActFactory {
         private List<String> recentCommands = new ArrayList<>();
 
         // ══════════════════════════════════════════════════════════
+        //  意图状态（Phase 3: 意图识别系统）
+        // ══════════════════════════════════════════════════════════
+
+        /**
+         * 当前意图名称（IntentTypeEnumVO 的 name()，注入 Prompt 前缀用）
+         */
+        private String currentIntent;
+
+        /**
+         * 当前意图识别完整结果（供反馈回路 reportFeedback 读取与重分类回写）
+         */
+        private IntentResultVO currentIntentResult;
+
+        // ══════════════════════════════════════════════════════════
         //  辅助方法
         // ══════════════════════════════════════════════════════════
 
@@ -251,14 +266,13 @@ public class DefaultReActFactory {
         }
 
         public void appendToolMessage(String toolCallId, String content) {
-            Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content",
-                    content);
+            Map<String, Object> msg = Map.of("role", "tool", "tool_call_id", toolCallId, "content", content);
             messageHistory.add(msg);
         }
 
         public void addRecentCommand(String command) {
             if (command == null || command.trim()
-                                          .isEmpty()) return;
+                    .isEmpty()) return;
             recentCommands.add(command.trim());
             while (recentCommands.size() > 20) {
                 recentCommands.remove(0);

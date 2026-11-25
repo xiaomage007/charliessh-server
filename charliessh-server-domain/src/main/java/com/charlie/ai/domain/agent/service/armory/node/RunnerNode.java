@@ -36,7 +36,8 @@ public class RunnerNode extends AbstractArmorySupport {
     private CustomRunnerFactory customRunnerFactory;
 
     @Override
-    protected AiAgentRegisterVO doApply(ArmoryCommandEntity requestParameter, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
+    protected AiAgentRegisterVO doApply(ArmoryCommandEntity requestParameter,
+            DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
         log.info("Ai Agent 装配操作 - RunnerNode");
 
         AiAgentConfigTableVO aiAgentConfigTableVO = requestParameter.getAiAgentConfigTableVO();
@@ -54,6 +55,11 @@ public class RunnerNode extends AbstractArmorySupport {
                 .agentName(agentName)
                 .agentDesc(agentDesc)
                 .runner(runner)
+                // 透传 Agent 的 API 配置与模型名，供意图识别等旁路能力复用（见 AiAgentRegisterVO）。这样就都统一了，都用一套LLM配置
+                .openAiApi(dynamicContext.getOpenAiApi())
+                .chatModelName(aiAgentConfigTableVO.getModule()
+                        .getChatModel()
+                        .getModel())
                 .build();
 
         // 注册到 Spring 容器
@@ -62,8 +68,10 @@ public class RunnerNode extends AbstractArmorySupport {
         return aiAgentRegisterVO;
     }
 
-    private Runner getRunner(DefaultArmoryFactory.DynamicContext dynamicContext, AiAgentConfigTableVO aiAgentConfigTableVO, String appName) {
-        AiAgentConfigTableVO.Module.Runner runnerConfig = aiAgentConfigTableVO.getModule().getRunner();
+    private Runner getRunner(DefaultArmoryFactory.DynamicContext dynamicContext,
+            AiAgentConfigTableVO aiAgentConfigTableVO, String appName) {
+        AiAgentConfigTableVO.Module.Runner runnerConfig = aiAgentConfigTableVO.getModule()
+                .getRunner();
 
         // 装配发生在 ApplicationReadyEvent 阶段，任何一个配置表漏配 runner 都会让整个 Spring 上下文启动失败；
         // 所以这里必须自己把空值拦住并给出可读信息，而不是把裸 NPE 抛给 AiAgentAutoConfig 再包成 RuntimeException
@@ -81,7 +89,8 @@ public class RunnerNode extends AbstractArmorySupport {
         // runner.agentName 必须是前序节点已经构建并放入 agentGroup 的智能体名；
         // 名字写错时若不在装配期拦住，InMemoryRunner 会持有 null agent，
         // 直到 runAsync 时才在 InvocationContext.agent() 处抛空指针，现场离根因太远
-        BaseAgent baseAgent = dynamicContext.getAgentGroup().get(agentName);
+        BaseAgent baseAgent = dynamicContext.getAgentGroup()
+                .get(agentName);
         if (null == baseAgent) {
             log.error("runner.agentName {} not found in agentGroup. appName: {}", agentName, appName);
             throw new AppException(ResponseCode.ILLEGAL_PARAMETER.getCode(), ResponseCode.ILLEGAL_PARAMETER.getInfo());
@@ -104,7 +113,9 @@ public class RunnerNode extends AbstractArmorySupport {
     }
 
     @Override
-    public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, AiAgentRegisterVO> get(ArmoryCommandEntity armoryCommandEntity, DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
+    public StrategyHandler<ArmoryCommandEntity, DefaultArmoryFactory.DynamicContext, AiAgentRegisterVO> get(
+            ArmoryCommandEntity armoryCommandEntity,
+            DefaultArmoryFactory.DynamicContext dynamicContext) throws Exception {
         return defaultStrategyHandler;
     }
 }
