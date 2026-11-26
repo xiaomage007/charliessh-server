@@ -103,12 +103,12 @@ public class CustomAdkSessionService implements BaseSessionService {
      *
      * <p>案例：
      * <pre>
-     *   appName   = walissh-app
+     *   appName   = charliessh-app
      *   userId    = user-001
      *   sessionId = react-session-01
      *
      *   创建后得到：
-     *   sessions["walissh-app"]["user-001"]["react-session-01"] = SessionSnapshot
+     *   sessions["charliessh-app"]["user-001"]["react-session-01"] = SessionSnapshot
      * </pre>
      *
      * @param appName      应用名
