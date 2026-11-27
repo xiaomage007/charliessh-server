@@ -1,5 +1,7 @@
 package com.charlie.ai.domain.agent.adapter.repository;
 
+import com.charlie.ai.domain.agent.model.entity.ChatMessageEntity;
+import com.charlie.ai.domain.agent.model.entity.ChatSessionEntity;
 import com.charlie.ai.domain.agent.model.valobj.prompt.MilestoneVO;
 import com.charlie.ai.domain.agent.service.armory.node.RootNode;
 import com.charlie.ai.domain.agent.service.promote.dynamic.MilestoneTracker;
